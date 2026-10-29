@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: agentic-image-api
+    runtime: node
+    plan: free
+    rootDir: apps/api
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: DEMO_MODE
+        value: "true"
+      - key: DESIGN_COUNT
+        value: "1"
+      - key: VIDEO_POST_ENABLED
+        value: "false"
+      - key: DATA_DIR
+        value: /tmp/agentic-data
+      - key: STATE_DB_PATH
+        value: /tmp/agentic-data/agentic-state.sqlite
+      - key: WHATSAPP_HANDOFF_URL
+        value: https://whatsapp-bot-1lmp.onrender.com/whatsapp/integrations/agentic/previews
+      - key: INTERNAL_SERVICE_TOKEN
+        sync: false

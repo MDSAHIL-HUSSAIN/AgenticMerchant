@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Local product design agent demo studio">
+  <title>VisionCraft · Design Agent Studio</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="VisionCraft home">
+      <span class="brand-mark"><i></i><i></i><i></i></span>
+      <span>VISIONCRAFT</span>
+    </a>
+    <div class="topbar-meta">
+      <span class="mode-pill" id="mode-pill"><span class="status-dot"></span> Checking engine</span>
+      <span class="prototype-pill">LOCAL PROTOTYPE</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="kicker">AUTONOMOUS CREATIVE LAB</p>
+        <h1>One product.<br><em>One winning creative.</em></h1>
+        <p class="hero-text">Give the agent a brief and optional product photos. It will autonomously create, inspect and revise one winning campaign image or a cinematic 30-second product film.</p>
+      </div>
+      <div class="hero-orbit" aria-hidden="true">
+        <div class="orbit-card orbit-one"><span>01</span><b>ART<br>DIRECT</b></div>
+        <div class="orbit-card orbit-two"><span>02</span><b>RENDER<br>PACK</b></div>
+        <div class="orbit-card orbit-three"><span>03</span><b>VISION<br>CHECK</b></div>
+        <div class="orbit-core">A</div>
+      </div>
+    </section>
+
+    <section class="studio-shell">
+      <aside class="brief-panel">
+        <div class="panel-heading">
+          <span class="step-number">01</span>
+          <div><p>PRODUCT INPUT</p><h2>Build the brief</h2></div>
+        </div>
+
+        <form id="brief-form">
+          <label class="field field-full">
+            <span>Output</span>
+            <select name="outputType" id="output-type"><option value="image">Campaign image</option><option value="video">30-second product film</option></select>
+          </label>
+          <label class="field field-full">
+            <span>Product name <b>*</b></span>
+            <input name="productName" value="Cotton Kurti" required minlength="3" placeholder="e.g. Cotton Kurti">
+          </label>
+          <div class="field-row">
+            <label class="field"><span>Brand</span><input name="brand" value="Kavya Boutique" placeholder="Brand name"></label>
+            <label class="field"><span>Category</span><input name="category" value="Women's clothing" placeholder="Category"></label>
+          </div>
+          <div class="field-row">
+            <label class="field"><span>Price</span><input name="price" type="number" value="799" min="0" placeholder="799"></label>
+            <label class="field"><span>Model / SKU</span><input name="model" placeholder="Optional"></label>
+          </div>
+          <label class="field field-full">
+            <span>Key features</span>
+            <textarea name="features" rows="3" placeholder="One feature per line">100% soft cotton&#10;Festive detailing&#10;Comfortable regular fit</textarea>
+          </label>
+          <div class="field-row">
+            <label class="field"><span>Colours</span><input name="colors" value="rust, warm cream" placeholder="rust, cream"></label>
+            <label class="field"><span>Sizes</span><input name="sizes" value="M, L" placeholder="M, L"></label>
+          </div>
+          <label class="field field-full">
+            <span>Creative direction</span>
+            <textarea name="creativeDirection" rows="3" placeholder="Mood, audience and visual direction">Warm festive premium, refined editorial styling, tactile textile details</textarea>
+          </label>
+          <label class="field field-full"><span>Call to action</span><input name="callToAction" value="Discover the collection" placeholder="Discover the details"></label>
+
+          <div class="upload-grid">
+            <label class="upload-card">
+              <input id="product-files" type="file" accept="image/*" multiple>
+              <span class="upload-icon">↗</span>
+              <b>Product photos</b>
+              <small>PNG, JPG, WebP · optional</small>
+              <output id="product-file-count">No files selected</output>
+            </label>
+            <label class="upload-card upload-reference">
+              <input id="reference-files" type="file" accept="image/*" multiple>
+              <span class="upload-icon">✦</span>
+              <b>Style references</b>
+              <small>Mood or inspiration · optional</small>
+              <output id="reference-file-count">No files selected</output>
+            </label>
+          </div>
+
+          <div class="form-note"><span>◎</span><p>A campaign image may use a placeholder, but a product film requires a real uploaded product photo. The app stops rather than creating a fake placeholder video.</p></div>
+          <button class="primary-button" type="submit"><span>Generate autonomous creative</span><i>→</i></button>
+        </form>
+      </aside>
+
+      <section class="workspace-panel" aria-live="polite">
+        <div class="workspace-header">
+          <div class="panel-heading">
+            <span class="step-number">02</span>
+            <div><p>AGENT OUTPUT</p><h2 id="workspace-title">Creative direction board</h2></div>
+          </div>
+          <div class="workspace-actions" id="workspace-actions" hidden>
+            <span id="revision-label">REVISION 01</span>
+            <button class="ghost-button" id="select-all" type="button">Select all</button>
+          </div>
+        </div>
+
+        <div class="empty-state" id="empty-state">
+          <div class="empty-art">
+            <div class="empty-frame"><span>YOUR<br>CAMPAIGN<br>APPEARS<br>HERE</span></div>
+            <div class="empty-disc"></div>
+            <div class="empty-grid"></div>
+          </div>
+          <h3>Ready when your product is.</h3>
+          <p>The agent will return one carefully selected 1080 × 1080 design and a quality report.</p>
+        </div>
+
+        <div class="clarification" id="clarification" hidden></div>
+        <div class="design-grid" id="design-grid" hidden></div>
+
+        <div class="review-dock" id="review-dock" hidden>
+          <div class="selection-summary"><b id="selection-count">0 selected</b><span>Choose designs to edit or approve</span></div>
+          <label class="revision-input"><span>Revision request</span><input id="feedback-input" placeholder="e.g. Make the background navy and feel more luxurious"></label>
+          <button class="secondary-button" id="revise-button" type="button">Apply edit</button>
+          <button class="approve-button" id="approve-button" type="button">Approve selected <span>✓</span></button>
+        </div>
+      </section>
+    </section>
+
+    <section class="exports-section" id="exports-section" hidden>
+      <div class="exports-copy">
+        <p class="kicker">APPROVED OUTPUTS</p>
+        <h2>Platform-ready,<br><em>pixel perfect.</em></h2>
+        <p>The approved creative has been rendered into the exact files your publishing teammates can receive as binary uploads.</p>
+        <div class="export-stats" id="export-stats"></div>
+      </div>
+      <div class="exports-gallery" id="exports-gallery"></div>
+    </section>
+
+    <section class="activity-section">
+      <div class="activity-heading"><span class="step-number">03</span><div><p>PIPELINE TRACE</p><h2>What the agent did</h2></div></div>
+      <ol class="activity-log" id="activity-log"><li><time>READY</time><span>Waiting for a product brief.</span></li></ol>
+    </section>
+  </main>
+
+  <dialog id="image-dialog">
+    <button class="dialog-close" type="button" aria-label="Close image">×</button>
+    <img id="dialog-image" alt="Full size design preview">
+    <div class="dialog-meta"><span id="dialog-label"></span><a id="dialog-download" download>Download PNG ↓</a></div>
+  </dialog>
+
+  <div class="loading-screen" id="loading-screen" hidden>
+    <div class="loader-mark"><i></i><i></i><i></i></div>
+    <p id="loading-kicker">AGENT AT WORK</p>
+    <h2 id="loading-title">Reading the product brief…</h2>
+    <div class="loading-bar"><span></span></div>
+    <small id="loading-detail">This stays local and may take a few seconds.</small>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

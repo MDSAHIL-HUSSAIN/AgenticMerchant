@@ -1,0 +1,30 @@
+{
+  "workDir": "D:\\E Drive\\Project\\Agentic\\artifacts\\framepack-smoke",
+  "outputPath": "D:\\E Drive\\Project\\Agentic\\artifacts\\framepack-smoke\\proof.mp4",
+  "ffmpegPath": "C:\\Users\\sahil\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-9.0.2-full_build\\bin\\ffmpeg.exe",
+  "width": 270,
+  "height": 480,
+  "fps": 24,
+  "durationSeconds": 1.0,
+  "enableGenerativeMotion": true,
+  "enableInterpolation": true,
+  "enableUpscale": true,
+  "enableAceMusic": true,
+  "musicPrompt": "Premium minimal cinematic electronic instrumental, tactile percussion, emotional lift, decisive resolve, no vocals.",
+  "musicBpm": 120,
+  "musicSeed": 20261029,
+  "crf": 24,
+  "shots": [
+    {
+      "path": "D:\\E Drive\\Project\\Agentic\\artifacts\\people-scene-proof.jpg",
+      "sourceImagePath": "D:\\E Drive\\Project\\Agentic\\artifacts\\people-scene-proof.jpg",
+      "durationSeconds": 1.0,
+      "camera": "slow cinematic push-in",
+      "motion": "natural fabric and environmental motion",
+      "renderMode": "GENERATIVE",
+      "prompt": "Cinematic vertical advertisement of a confident young Indian woman walking naturally through a sunlit modern city in an elegant cotton kurti, realistic body motion, fabric moving in a gentle breeze, smooth tracking camera, natural face and hands.",
+      "negativePrompt": "text, letters, watermark, logo, deformation, extra fingers, jitter, flicker, static image",
+      "seed": 20261029
+    }
+  ]
+}

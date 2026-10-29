@@ -1,0 +1,312 @@
+# Autonomous Product Design Agent
+
+This prototype contains the image workflow plus an autonomous local video-post workflow:
+
+1. multimodal product drafts from text, images and audio;
+2. an Adobe-independent SVG/Sharp renderer that creates the strongest prototype design;
+3. deterministic quality gates, automatic repair, and an opt-in rendered-image Gemini review.
+4. versioned approve/edit/reject handling and binary WhatsApp preview handoff;
+5. locked approval, platform exports and binary publishing handoff;
+6. an optional Adobe manual-edit queue that returns edited renditions as new revisions.
+7. a persistent, queued 8–60 second product-film pipeline with autonomous planning, controlled keyframes, generated motion, audio, temporal QA, revisions, approval, and exports.
+
+The Adobe Express add-on remains available as the optional editable-canvas bridge. Automatic preview creation no longer depends on Adobe Express being open.
+
+## Current pipeline
+
+```text
+WhatsApp/backend multipart message
+    ├── metadata and text
+    ├── product/reference/logo images
+    └── audio plus optional transcript
+             │
+             ▼
+Product draft
+    ├── merge messages across the conversation
+    ├── classify media roles
+    ├── transcribe locally when enabled
+    └── return clarification questions when uncertain
+             │
+             ▼
+One bounded design specification
+             │
+             ▼
+Local SVG + Sharp PNG renderer
+             │
+             ▼
+Bounds / overflow / overlap / rendered-image QA
+             │
+             ▼
+Private preview asset IDs and binary image endpoints
+```
+
+## Install and run
+
+### Render deployment for the image API
+
+The root `render.yaml` deploys only `apps/api` with the local video worker disabled. Uploaded images and SQLite state use Render's ephemeral `/tmp` storage on the free plan, which is suitable for integration testing but not durable production storage. Configure `INTERNAL_SERVICE_TOKEN` during Blueprint creation and deploy the updated WhatsApp receiver before testing.
+
+```powershell
+npm run install:all
+npm run dev:api
+```
+
+The API defaults to `http://localhost:8787`.
+
+## Temporary visual demo studio
+
+The API now serves a local end-to-end review interface at:
+
+```text
+http://localhost:8787
+```
+
+Start it with:
+
+```powershell
+npm run demo
+```
+
+The demo accepts a product brief plus optional product/reference images and creates either one best campaign image or one 30-second product film. Both support revisions, approval, and platform exports. It uses the same private binary asset endpoints as the integration pipeline. With the default `DEMO_MODE=true`, it does not call external image search, Gemini, Cloudflare or other quota-limited providers.
+
+## Autonomous video posts
+
+Queue a vertical film from an existing product draft:
+
+```text
+POST /api/product-drafts/:id/video
+```
+
+The optional JSON body accepts `durationSeconds` (8–60), `fps`, `aspectRatio`, and `narrationEnabled`. Read progress from `GET /api/video-jobs/:id` or the SSE endpoint `GET /api/video-jobs/:id/events`. Revision, approval, cancellation, and retry endpoints live under `/api/video-jobs/:id/*`; the generic job feedback and approval routes also dispatch video jobs correctly.
+
+The isolated Python worker generates short people/story motion with FramePack, doubles temporal resolution with RIFE, upscales generated scenes with Real-ESRGAN, and intercuts those scenes with product-identity-safe hero shots. ACE-Step creates an original 120 BPM score; cuts are quantized to its half-second beat grid. Optional narration uses Kokoro. The final MP4 is checked with ffprobe and loudness analysis for exact duration, dimensions, audio presence, and audibility. Approval creates a 1080×1920 master, Instagram/Facebook reels, square and portrait variants, and a poster. Job metadata survives API restarts in SQLite.
+
+A real uploaded product image is mandatory. In worker mode, PEOPLE shots also require the configured scene-image provider to create diverse cinematic source frames before FramePack animates them. The job fails clearly when either prerequisite is unavailable; it does not silently publish a placeholder slideshow.
+
+Inspect local model and executable readiness with `GET /api/video-worker/health`. Run a full offline render/approval/export check with `npm run smoke:video`; set `SMOKE_VIDEO_DURATION=30` for the default-film validation or `60` for the supported one-minute maximum.
+
+The Adobe add-on remains available with:
+
+```powershell
+npm run build:addon
+npm run start:addon
+```
+
+## Multimodal intake
+
+Send `multipart/form-data` to:
+
+```text
+POST /api/product-drafts/messages
+```
+
+The `metadata` field is JSON:
+
+```json
+{
+  "merchantId": "merchant_123",
+  "conversationId": "conversation_789",
+  "productId": "product_456",
+  "productName": "Cotton Kurti",
+  "brand": "Kavya Boutique",
+  "category": "Women's clothing",
+  "price": 799,
+  "features": ["100% cotton", "festive wear"],
+  "colors": ["rust"],
+  "sizes": ["M", "L"],
+  "creativeDirection": "warm festive premium",
+  "mediaRoles": {
+    "product_image": "PRIMARY_PRODUCT",
+    "inspiration": "STYLE_REFERENCE"
+  },
+  "audioTranscripts": {
+    "voice_note": "Cotton kurti, price 799, sizes M and L"
+  }
+}
+```
+
+Attach files under any field name. Descriptive names such as `product_image`, `logo`, `detail`, and `inspiration` improve deterministic classification. When an image remains ambiguous, the response has status `NEEDS_CLARIFICATION` and includes a question.
+
+Resolve it with:
+
+```text
+POST /api/product-drafts/:id/clarifications
+```
+
+```json
+{
+  "questionId": "...",
+  "answer": "product"
+}
+```
+
+Create the rendered campaign design with:
+
+```text
+POST /api/product-drafts/:id/design
+```
+
+The response contains one private preview asset. Retrieve its actual bytes using:
+
+```text
+GET /api/assets/:assetId/content
+```
+
+No public image URL is required.
+
+## Approval and revision loop
+
+### Integrated WhatsApp image workflow
+
+The teammate service is included at `apps/whatsapp-bot`. It now accepts signed inbound Meta image/text events, stores them in a PostgreSQL-backed integration queue, downloads product media asynchronously, and calls Agentic through dedicated Bearer-authenticated routes:
+
+```http
+POST /api/integrations/whatsapp/messages
+POST /api/integrations/whatsapp/jobs/:jobId/feedback
+```
+
+Agentic returns previews to:
+
+```http
+POST /whatsapp/integrations/agentic/previews
+```
+
+Configure both services with the same private `INTERNAL_SERVICE_TOKEN`, set `AGENTIC_API_URL` in the bot, and set Agentic's `WHATSAPP_HANDOFF_URL` to the bot preview endpoint. The Meta verification token remains separate. See `apps/whatsapp-bot/README.md` for migration and deployment steps.
+
+Deliver the current preview pack as multipart binary files to the configured WhatsApp service:
+
+```text
+POST /api/jobs/:jobId/deliver-preview
+```
+
+Configure its receiving endpoint with `WHATSAPP_HANDOFF_URL`. If it is empty, the endpoint reports `NOT_CONFIGURED` without losing the preview assets.
+
+WhatsApp feedback is accepted as JSON or multipart text, audio and images:
+
+```text
+POST /api/jobs/:jobId/feedback
+```
+
+Supported actions are `APPROVE_ALL`, `APPROVE_SELECTED`, `EDIT_SELECTED`, `REJECT_SELECTED`, `REJECT_ALL`, and `EDIT_MANUALLY`. Every automatic edit or rejection creates a new immutable revision and reruns rendering and QA. Supply `messageId` or `idempotencyKey` to prevent duplicate processing.
+
+## Final exports and publishing handoff
+
+Approval can also be called directly:
+
+```text
+POST /api/jobs/:jobId/approve
+```
+
+Approved designs are locked and exported as:
+
+- 2160×2160 master;
+- 1600×1600 Shopify;
+- 1080×1080 Instagram square;
+- 1080×1350 Instagram portrait;
+- 1200×630 Facebook feed.
+
+Approval automatically transfers all final files through the configured publishing handoffs. The following endpoint remains available only as an idempotent retry/recovery operation:
+
+```text
+POST /api/jobs/:jobId/deliver-final
+```
+
+Configure the receiver with `PUBLISHING_HANDOFF_URL`. Both handoff adapters can use `INTERNAL_SERVICE_TOKEN` for a bearer token and send a stable idempotency key.
+
+### Existing Facebook StoreBot integration
+
+The prototype can also work with the Facebook teammate's current publisher without changing that repository. Configure `FACEBOOK_CLOUDINARY_CLOUD_NAME`, `FACEBOOK_CLOUDINARY_API_KEY`, `FACEBOOK_CLOUDINARY_API_SECRET`, `FACEBOOK_PUBLISH_URL`, and `FACEBOOK_PUBLISH_SECRET`. On approval, the service uploads the one approved `facebook_feed` PNG to the dedicated Facebook Cloudinary account and only then calls the existing `/api/publish` trigger. Upload and publishing are sequential because the existing publisher selects the newest untagged Cloudinary image. When `PUBLISHING_HANDOFF_URL` is configured, the same approval sends the complete platform-tagged binary export set to the shared publishing receiver for the other services.
+
+## Optional Adobe manual editing
+
+`EDIT_MANUALLY` creates an Adobe queue item. In add-on version 1.2.0:
+
+1. select **Load pending edit**;
+2. the add-on claims the job and recreates it with native Adobe text, image and shape elements;
+3. edit the page normally;
+4. select **Save edited revision**;
+5. the add-on renders the exact page and uploads the image bytes;
+6. the backend validates the rendition and creates a new approval revision.
+
+Adobe queue endpoints are:
+
+```text
+POST /api/jobs/:jobId/adobe-edit
+GET  /api/adobe/jobs/pending
+POST /api/adobe/jobs/:id/claim
+GET  /api/adobe/jobs/:id/specification
+POST /api/adobe/jobs/:id/page
+POST /api/adobe/jobs/:id/result
+```
+
+## Optional local audio transcription
+
+Install the local Python dependency:
+
+```powershell
+python -m pip install -r apps/api/requirements-whisper.txt
+```
+
+Then configure:
+
+```dotenv
+LOCAL_WHISPER_ENABLED=true
+LOCAL_WHISPER_MODEL=small
+PYTHON_COMMAND=python
+```
+
+The first Faster Whisper run downloads the selected model. Leave it disabled when the WhatsApp service already supplies a transcript.
+
+## Optional live visual intelligence
+
+Provider-backed features are explicitly opt-in so ordinary local tests cannot consume free quotas:
+
+```dotenv
+AUTONOMOUS_MEDIA_ANALYSIS=true
+AUTONOMOUS_VISION_QA=true
+AUTONOMOUS_REVISION_AI=true
+```
+
+`AUTONOMOUS_MEDIA_ANALYSIS` classifies uploaded images, `AUTONOMOUS_VISION_QA` critiques the actual rendered pack, and `AUTONOMOUS_REVISION_AI` interprets open-ended merchant revision language. They require `GEMINI_API_KEY`; all remain disabled by default to protect quota and fall back to deterministic behavior.
+
+Existing live adapters remain available for SerpApi, Tavily, Pixabay and Cloudflare Workers AI. Missing providers degrade to local planning, geometry and merchant-supplied assets.
+
+## Quality loop
+
+Every locally rendered page is checked for:
+
+- canvas and footer boundary violations;
+- text/product collisions;
+- estimated headline overflow;
+- missing or visually empty output;
+- repeated pack composition signatures.
+
+Failed designs are repaired and rerendered up to `MAX_AUTOMATIC_REPAIRS` times. Provider-backed visual review is an optional second layer, not a requirement for rendering.
+
+## Tests
+
+```powershell
+npm test
+```
+
+The tests use local rendering and mocked provider responses. They do not call live APIs.
+
+## Current boundary
+
+Implemented now:
+
+- multimodal draft accumulation;
+- clarification state;
+- optional local Whisper adapter;
+- optional uploaded-image vision classification;
+- one best-design specification for the current publisher prototype;
+- Adobe-independent PNG rendering;
+- private binary asset storage;
+- deterministic repair and optional rendered-image vision review.
+- immutable feedback revisions and rejection regeneration;
+- private multipart preview handoff;
+- approval locking and five final export formats;
+- idempotent private publishing handoff;
+- optional native Adobe edit and rendition round-trip.
+
+The remaining infrastructure boundary is persistence: draft, job, revision and queue metadata currently live in process memory while binary assets live under `apps/api/data`. Replace `job-store.js`, `drafts.js`, `adobe-queue.js` and `media-store.js` with the Railway/database adapters when the shared schema is available; the API contracts and rendering workflow do not need to change.

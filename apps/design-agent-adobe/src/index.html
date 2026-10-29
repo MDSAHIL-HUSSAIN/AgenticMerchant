@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Autonomous product creative generation for Adobe Express" />
+    <title>Product Design Agent</title>
+    <style>
+      :root { color-scheme: light; font-family: Inter, "Adobe Clean", system-ui, sans-serif; color: #161616; background: #f7f7f7; }
+      * { box-sizing: border-box; }
+      body { margin: 0; }
+      main { padding: 18px; display: grid; gap: 16px; }
+      header { display: flex; align-items: center; gap: 10px; }
+      .mark { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; background: #111; color: #b9ff38; font-weight: 900; }
+      h1 { font-size: 17px; margin: 0; letter-spacing: -.02em; }
+      header p { margin: 2px 0 0; font-size: 11px; color: #666; }
+      form, .result { display: grid; gap: 11px; }
+      label { display: grid; gap: 5px; font-size: 11px; font-weight: 700; color: #555; }
+      input, textarea { width: 100%; border: 1px solid #d6d6d6; border-radius: 9px; background: white; padding: 9px 10px; font: inherit; font-size: 12px; outline: none; }
+      input:focus, textarea:focus { border-color: #6b45ff; box-shadow: 0 0 0 2px #6b45ff22; }
+      textarea { resize: vertical; min-height: 58px; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+      button { width: 100%; border: 0; border-radius: 12px; min-height: 40px; padding: 9px 12px; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+      button.primary { background: #6b45ff; color: white; }
+      button.secondary { background: #171717; color: white; }
+      button:disabled { opacity: .45; cursor: wait; }
+      .status { min-height: 18px; font-size: 11px; color: #5d5d5d; }
+      .status.error { color: #b42318; }
+      .gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .card { aspect-ratio: 1; border-radius: 10px; overflow: hidden; position: relative; background: #ddd; box-shadow: 0 1px 3px #0002; }
+      .card canvas { width: 100%; height: 100%; display: block; }
+      .caption { position: absolute; inset: auto 6px 6px; border-radius: 5px; padding: 4px 6px; color: white; background: #000a; font-size: 7px; letter-spacing: .08em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .warning { border-radius: 9px; background: #fff3cd; padding: 8px; font-size: 10px; color: #695300; }
+      .insight { border-radius: 9px; background: #e9f7f1; border: 1px solid #b8e7d3; padding: 8px; font-size: 10px; color: #155c45; }
+      .manual { display: grid; gap: 8px; border-top: 1px solid #ddd; padding-top: 13px; }
+      .manual h2 { margin: 0; font-size: 13px; }
+      .manual p { margin: 0; font-size: 10px; color: #666; line-height: 1.4; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header><div class="mark">A</div><div><h1>Product Design Agent</h1><p>Vision select → art direct → critique → Adobe</p></div></header>
+      <form id="briefForm">
+        <label>Product name *<input id="product" required value="Air Max 270" /></label>
+        <div class="row">
+          <label>Brand<input id="brand" value="Nike" /></label>
+          <label>Model / SKU<input id="model" value="AH8050" /></label>
+        </div>
+        <div class="row">
+          <label>Category<input id="category" value="Sneakers" /></label>
+          <label>Colorway<input id="colorway" value="Black / White" /></label>
+        </div>
+        <label>Key features<textarea id="features">Air cushioning
+Breathable mesh
+Sculpted heel</textarea></label>
+        <label>Creative direction<textarea id="tone">Futuristic, premium, high contrast, energetic</textarea></label>
+        <button class="primary" id="generate" type="button">Generate design pack</button>
+      </form>
+      <div id="status" class="status" aria-live="polite">API: checking…</div>
+      <section id="result" class="result" hidden>
+        <div id="warnings"></div>
+        <div id="gallery" class="gallery"></div>
+        <button id="createInAdobe" class="secondary" disabled>Create design in Adobe Express</button>
+      </section>
+      <section class="manual">
+        <h2>Optional manual edit</h2>
+        <p>Load the next design requested from WhatsApp, edit its native Adobe elements, then save the rendition as a new revision.</p>
+        <button id="loadAdobeEdit" class="secondary" type="button">Load pending edit</button>
+        <button id="saveAdobeEdit" class="primary" type="button" disabled>Save edited revision</button>
+      </section>
+    </main>
+    <script type="module" src="add-on-console-override.js"></script>
+    <script type="module" src="ui/index.js"></script>
+  </body>
+</html>

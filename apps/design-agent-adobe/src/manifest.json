@@ -1,0 +1,27 @@
+{
+    "testId": "9aedcea4-28f7-4d49-8c9e-c7e75ea0f8a6",
+    "name": "Design Agent Adobe",
+    "version": "1.2.0",
+    "manifestVersion": 2,
+    "requirements": {
+        "experimentalApis": true,
+        "renditionPreview": true,
+        "apps": [
+            {
+                "name": "Express",
+                "apiVersion": 1
+            }
+        ]
+    },
+    "entryPoints": [
+        {
+            "type": "panel",
+            "id": "panel1",
+            "main": "index.html",
+            "documentSandbox": "sandbox/code.js",
+            "permissions": {
+                "sandbox": ["allow-downloads"]
+            }
+        }
+    ]
+}

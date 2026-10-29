@@ -1,0 +1,16 @@
+.env
+node_modules/
+dist/
+.cache/
+artifacts/
+temp/
+apps/api/data/
+apps/api/node_modules/
+apps/design-agent-adobe/node_modules/
+apps/design-agent-adobe/dist/
+# The teammate bot remains in its own Git repository and Render service.
+apps/whatsapp-bot/
+*.log
+__pycache__/
+*.pyc
+
