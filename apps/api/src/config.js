@@ -38,6 +38,8 @@ export const config = {
   facebookCloudinaryApiSecret: process.env.FACEBOOK_CLOUDINARY_API_SECRET || "",
   facebookPublishUrl: process.env.FACEBOOK_PUBLISH_URL || "",
   facebookPublishSecret: process.env.FACEBOOK_PUBLISH_SECRET || "",
+  instagramPublishUrl: process.env.INSTAGRAM_PUBLISH_URL || "",
+  instagramPublishApiKey: process.env.INSTAGRAM_PUBLISH_API_KEY || "",
   serpApiKey: process.env.SERPAPI_KEY || "",
   tavilyApiKey: process.env.TAVILY_API_KEY || "",
   geminiApiKey: process.env.GEMINI_API_KEY || "",
@@ -65,7 +67,7 @@ export const config = {
   videoPreviewHeight: Math.max(480, Number(process.env.VIDEO_PREVIEW_HEIGHT || 960)),
   videoFinalWidth: Math.max(540, Number(process.env.VIDEO_FINAL_WIDTH || 1080)),
   videoFinalHeight: Math.max(960, Number(process.env.VIDEO_FINAL_HEIGHT || 1920)),
-  videoDefaultDurationSeconds: Math.max(8, Math.min(60, Number(process.env.VIDEO_DEFAULT_DURATION_SECONDS || 30))),
+  videoDefaultDurationSeconds: Math.max(8, Math.min(60, Number(process.env.VIDEO_DEFAULT_DURATION_SECONDS || 15))),
   videoDefaultFps: [24, 25, 30, 50, 60].includes(Number(process.env.VIDEO_DEFAULT_FPS)) ? Number(process.env.VIDEO_DEFAULT_FPS) : 30,
   maxVideoShotRepairs: Math.max(0, Math.min(4, Number(process.env.MAX_VIDEO_SHOT_REPAIRS || 2))),
   maxVideoJobRepairs: Math.max(0, Math.min(20, Number(process.env.MAX_VIDEO_JOB_REPAIRS || 8))),
@@ -98,6 +100,7 @@ export function providerStatus() {
       config.facebookCloudinaryApiSecret &&
       config.facebookPublishUrl &&
       config.facebookPublishSecret
-    )
+    ),
+    instagramPublisher: Boolean(config.instagramPublishUrl && config.instagramPublishApiKey)
   };
 }

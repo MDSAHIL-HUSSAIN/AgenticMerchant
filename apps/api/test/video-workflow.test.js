@@ -61,6 +61,11 @@ test("keeps every shot duration positive for the shortest supported film", async
   const plan = createDeterministicVideoPlan(validateBrief({ product: "Mini", features: ["One"] }), { durationSeconds: 8, fps: 24 });
   assert.equal(Math.round(plan.shots.reduce((sum, shot) => sum + shot.durationSeconds, 0) * 10) / 10, 8);
   assert.equal(plan.shots.every(shot => shot.durationSeconds > 0), true);
+  assert.equal(plan.shots.every(shot => shot.sceneType === "PRODUCT"), true);
+  assert.equal(plan.shots.some(shot => shot.renderMode === "GENERATIVE"), false);
+  assert.equal(plan.shots.every(shot => Number.isFinite(shot.musicCue?.beat)), true);
+  assert.equal(plan.music.bpm, 96);
+  assert.equal(new Set(plan.shots.map(shot => `${shot.focus.x}:${shot.focus.y}:${shot.focus.zoom}`)).size >= 4, true);
 });
 
 test("revises only the requested video direction and preserves immutable history", async () => {

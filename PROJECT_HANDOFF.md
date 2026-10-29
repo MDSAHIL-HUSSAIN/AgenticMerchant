@@ -1,5 +1,7 @@
 # VisionCraft / Autonomous Product Design Agent — Project Handoff
 
+For the latest deployed Agentic ↔ WhatsApp image integration state, read `WHATSAPP_IMAGE_INTEGRATION_HANDOFF.md` first.
+
 Last updated: 29 October 2026
 
 Workspace: `D:\E Drive\Project\Agentic`

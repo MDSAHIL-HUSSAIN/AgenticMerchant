@@ -1,8 +1,7 @@
 process.env.VIDEO_WORKER_MODE = "worker";
 process.env.VIDEO_POST_ENABLED = "true";
-process.env.VIDEO_PREVIEW_WIDTH = process.env.VIDEO_PREVIEW_WIDTH || "270";
-process.env.VIDEO_PREVIEW_HEIGHT = process.env.VIDEO_PREVIEW_HEIGHT || "480";
-process.env.AUTONOMOUS_VIDEO_PLANNING = "false";
+process.env.VIDEO_PREVIEW_WIDTH = process.env.VIDEO_PREVIEW_WIDTH || "540";
+process.env.VIDEO_PREVIEW_HEIGHT = process.env.VIDEO_PREVIEW_HEIGHT || "960";
 
 import { readFile } from "node:fs/promises";
 const { validateBrief } = await import("../src/brief.js");
@@ -25,20 +24,20 @@ const product = await storeMedia({
   kind: "PRIMARY_PRODUCT"
 });
 const brief = validateBrief({
-  product: "Atelier One",
-  brand: "Northstar",
-  category: "premium technology",
-  colorway: "obsidian and copper",
-  features: ["Precision body", "Quiet performance", "All-day balance"],
-  tone: "minimal, cinematic, precise",
-  callToAction: "Meet Atelier One"
+  product: process.env.SMOKE_PRODUCT_NAME || "Cotton Kurti",
+  brand: process.env.SMOKE_PRODUCT_BRAND || "Kavya Boutique",
+  category: process.env.SMOKE_PRODUCT_CATEGORY || "fashion apparel",
+  colorway: process.env.SMOKE_PRODUCT_COLORWAY || "warm ivory with embroidered detail",
+  features: (process.env.SMOKE_PRODUCT_FEATURES || "Soft cotton|Embroidered neckline and cuffs|Effortless everyday comfort").split("|").map(value => value.trim()).filter(Boolean),
+  tone: process.env.SMOKE_PRODUCT_TONE || "warm, editorial, refined",
+  callToAction: process.env.SMOKE_PRODUCT_CTA || "Discover the collection"
 });
-const durationSeconds = Math.max(8, Math.min(60, Number(process.env.SMOKE_VIDEO_DURATION || 8)));
+const durationSeconds = Math.max(8, Math.min(60, Number(process.env.SMOKE_VIDEO_DURATION || 15)));
 const fps = [24, 25, 30, 50, 60].includes(Number(process.env.SMOKE_VIDEO_FPS)) ? Number(process.env.SMOKE_VIDEO_FPS) : 24;
 const queued = createVideoJob(brief, {
   durationSeconds,
   fps,
-  useAi: false,
+  useAi: String(process.env.SMOKE_USE_AI ?? "true").toLowerCase() !== "false",
   productAssetIds: [product.id]
 }, { merchantId: "local-smoke", conversationId: `smoke-${Date.now()}` });
 const ready = await waitForVideoJob(queued.id, { timeoutMs: 7_200_000 });

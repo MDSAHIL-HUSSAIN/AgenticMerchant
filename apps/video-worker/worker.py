@@ -10,10 +10,13 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import os
 import shutil
+import struct
 import subprocess
 import sys
+import wave
 from pathlib import Path
 
 
@@ -131,11 +134,12 @@ def health() -> dict:
     }
 
 
-def _run(args: list[str], timeout: int = 3600) -> None:
+def _run(args: list[str], timeout: int = 3600) -> subprocess.CompletedProcess:
     completed = subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
     if completed.returncode:
         tail = (completed.stderr or completed.stdout)[-2000:]
         raise RuntimeError(f"{Path(args[0]).name} exited with {completed.returncode}: {tail}")
+    return completed
 
 
 def _emit_progress(stage: str, progress: int, message: str) -> None:
@@ -150,6 +154,8 @@ def _interpolate_rife(clip: Path, work_dir: Path, index: int) -> Path:
     if not script.is_file():
         raise RuntimeError("Practical-RIFE runtime is unavailable.")
     output = work_dir / f"rife-shot-{index + 1:02d}.mp4"
+    if output.is_file() and output.stat().st_size > 24:
+        return output
     _run([
         sys.executable,
         str(script),
@@ -171,15 +177,16 @@ def _upscale_realesrgan(clip: Path, work_dir: Path, index: int, ffmpeg: str, fps
         raise RuntimeError("Real-ESRGAN executable is unavailable.")
     input_dir = work_dir / f"esrgan-in-{index + 1:02d}"
     output_dir = work_dir / f"esrgan-out-{index + 1:02d}"
+    output = work_dir / f"esrgan-shot-{index + 1:02d}.mp4"
+    if output.is_file() and output.stat().st_size > 24:
+        return output
     shutil.rmtree(input_dir, ignore_errors=True)
     shutil.rmtree(output_dir, ignore_errors=True)
     input_dir.mkdir(parents=True)
     output_dir.mkdir(parents=True)
-    _run([
-        ffmpeg, "-y", "-i", str(clip),
-        "-vf", "scale=270:480:force_original_aspect_ratio=increase,crop=270:480",
-        str(input_dir / "frame%08d.png"),
-    ])
+    # Keep FramePack's native detail. The old pipeline reduced every generated
+    # frame to 270x480 before asking Real-ESRGAN to enlarge it again.
+    _run([ffmpeg, "-y", "-i", str(clip), str(input_dir / "frame%08d.png")])
     _run([
         str(executable),
         "-i", str(input_dir),
@@ -191,7 +198,6 @@ def _upscale_realesrgan(clip: Path, work_dir: Path, index: int, ffmpeg: str, fps
         "-t", "256",
         "-f", "png",
     ])
-    output = work_dir / f"esrgan-shot-{index + 1:02d}.mp4"
     _run([
         ffmpeg, "-y", "-framerate", str(fps), "-i", str(output_dir / "frame%08d.png"),
         "-c:v", "libx264", "-preset", "medium", "-crf", "18",
@@ -209,16 +215,27 @@ def _generate_ace_music(spec: dict, work_dir: Path) -> Path:
     if not ace_python.is_file() or not script.is_file():
         raise RuntimeError("ACE-Step music runtime is unavailable.")
     output = work_dir / "ace-step-soundtrack.wav"
-    _run([
+    if output.is_file() and output.stat().st_size > 44:
+        return output
+    completed = _run([
         str(ace_python), str(script),
         "--prompt", str(spec.get("musicPrompt") or "Minimal cinematic electronic instrumental, tactile percussion, no vocals."),
         "--duration", str(spec["durationSeconds"]),
         "--bpm", str(spec.get("musicBpm") or 120),
+        "--mood", str(spec.get("musicMood") or "premium, restrained and cinematic"),
+        "--keyscale", str(spec.get("musicKeyscale") or "D minor"),
+        "--timesignature", str(spec.get("musicTimesignature") or "4/4"),
+        "--candidates", str(spec.get("musicCandidateCount") or 2),
         "--seed", str(spec.get("musicSeed") or 20261029),
         "--output", str(output),
     ], timeout=7200)
     if not output.is_file():
         raise RuntimeError("ACE-Step reported success but produced no soundtrack.")
+    try:
+        payload = json.loads((completed.stdout or "").strip().splitlines()[-1])
+        (work_dir / "music-selection.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except (IndexError, json.JSONDecodeError):
+        pass
     return output
 
 
@@ -235,6 +252,56 @@ def _generate_kokoro_narration(spec: dict, work_dir: Path) -> Path:
     ], timeout=1800)
     if not output.is_file():
         raise RuntimeError("Kokoro reported success but produced no narration.")
+    return output
+
+
+def _generate_sound_design(spec: dict, work_dir: Path) -> Path:
+    """Create a deterministic tactile cue track at editorial cut points.
+
+    This is intentionally restrained: a low impact and short metallic tick mark
+    motivated cuts without pretending a generic sound library matches actions
+    that have not yet been semantically classified.
+    """
+    output = work_dir / "editorial-sound-design.wav"
+    sample_rate = 48_000
+    duration = float(spec["durationSeconds"])
+    frame_count = int(duration * sample_rate)
+    boundaries = []
+    cursor = 0.0
+    shots = spec.get("shots") or []
+    for index, shot in enumerate(shots[:-1]):
+        cursor += float(shot.get("durationSeconds") or 0)
+        next_role = str((shots[index + 1].get("musicCue") or {}).get("role") or "tactile cut").lower()
+        boundaries.append((cursor, next_role))
+    with wave.open(str(output), "wb") as target:
+        target.setnchannels(2)
+        target.setsampwidth(2)
+        target.setframerate(sample_rate)
+        block = bytearray()
+        for frame in range(frame_count):
+            t = frame / sample_rate
+            value = 0.0
+            for boundary, role in boundaries:
+                age = t - boundary
+                if 0.0 <= age < 0.32:
+                    if "hero" in role:
+                        value += 0.22 * math.sin(2 * math.pi * 58 * age) * math.exp(-10 * age)
+                        value += 0.055 * math.sin(2 * math.pi * 960 * age) * math.exp(-24 * age)
+                    elif "resolve" in role:
+                        value += 0.10 * math.sin(2 * math.pi * 164 * age) * math.exp(-8 * age)
+                        value += 0.05 * math.sin(2 * math.pi * 246 * age) * math.exp(-9 * age)
+                    else:
+                        value += 0.13 * math.sin(2 * math.pi * 72 * age) * math.exp(-14 * age)
+                        value += 0.04 * math.sin(2 * math.pi * 1280 * age) * math.exp(-28 * age)
+            # Very low room tone prevents sterile digital silence between cues.
+            value += 0.0025 * math.sin(2 * math.pi * 42 * t)
+            sample = max(-32767, min(32767, int(value * 32767)))
+            block.extend(struct.pack("<hh", sample, sample))
+            if len(block) >= 192_000:
+                target.writeframesraw(block)
+                block.clear()
+        if block:
+            target.writeframesraw(block)
     return output
 
 
@@ -257,8 +324,10 @@ def _generate_framepack_clip(shot: dict, work_dir: Path, index: int) -> tuple[Pa
     if not source.is_file():
         source = Path(shot["path"]).resolve()
     duration = max(1.0, float(shot["durationSeconds"]))
-    generation_seconds = min(duration, max(1.0, float(os.environ.get("FRAMEPACK_CLIP_SECONDS", "1.0"))))
+    generation_seconds = min(duration, max(1.0, float(os.environ.get("FRAMEPACK_CLIP_SECONDS", str(duration)))))
     destination = work_dir / f"framepack-shot-{index + 1:02d}.mp4"
+    if destination.is_file() and destination.stat().st_size > 24:
+        return destination, generation_seconds
     runner = Path(__file__).with_name("framepack_runner.py")
     _run([
         sys.executable, str(runner),
@@ -309,23 +378,46 @@ def compose(spec: dict) -> dict:
                 f"[{index}:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
                 f"crop={width}:{height},setpts={stretch:.6f}*(PTS-STARTPTS),"
                 f"fps={fps},tpad=stop_mode=clone:stop_duration={duration:.3f},"
-                f"trim=duration={duration:.3f},format=yuv420p[v{index}]"
+                f"trim=duration={duration:.3f},setsar=1,format=yuv420p[v{index}]"
             )
         else:
             # Image inputs default to 25 fps in FFmpeg. Pin the planned rate.
             arguments.extend(("-framerate", str(fps), "-loop", "1", "-t", f"{duration:.3f}", "-i", str(Path(shot["path"]).resolve())))
-            increment = 0.00035 if "slow" in str(shot.get("motion", "")).lower() else 0.00055
-            filters.append(
-                f"[{index}:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
-                f"crop={width}:{height},zoompan=z='min(zoom+{increment},1.075)':"
-                f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={width}x{height}:fps={fps},"
-                f"trim=duration={duration:.3f},setpts=PTS-STARTPTS,format=yuv420p[v{index}]"
-            )
+            if shot.get("renderMode") == "HYBRID":
+                # A restrained moving crop and exposure arc provide genuine
+                # motion-graphics treatment while preserving exact product
+                # geometry from the native-resolution master plate.
+                paths = (
+                    ("0.50-0.20*t/D", "0.62-0.12*t/D"),
+                    ("0.12+0.60*t/D", "0.48"),
+                    ("0.82-0.64*t/D", "0.54"),
+                    ("0.50", "0.68-0.30*t/D"),
+                    ("0.22+0.32*t/D", "0.54-0.08*t/D"),
+                )
+                path_x, path_y = paths[index % len(paths)]
+                path_x = path_x.replace("D", f"{duration:.3f}")
+                path_y = path_y.replace("D", f"{duration:.3f}")
+                filters.append(
+                    f"[{index}:v]scale={width + 72}:{height + 120}:force_original_aspect_ratio=increase,"
+                    f"crop={width}:{height}:x='(in_w-out_w)*({path_x})':"
+                    f"y='(in_h-out_h)*({path_y})',"
+                    f"eq=contrast='1.02+0.035*sin(PI*t/{duration:.3f})':"
+                    f"brightness='0.012*sin(PI*t/{duration:.3f})',fps={fps},"
+                    f"trim=duration={duration:.3f},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v{index}]"
+                )
+            else:
+                increment = 0.00018 if "slow" in str(shot.get("motion", "")).lower() else 0.00028
+                filters.append(
+                    f"[{index}:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+                    f"crop={width}:{height},zoompan=z='min(zoom+{increment},1.035)':"
+                    f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={width}x{height}:fps={fps},"
+                    f"trim=duration={duration:.3f},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v{index}]"
+                )
         labels.append(f"[v{index}]")
     total_duration = float(spec["durationSeconds"])
     audio_index = len(shots)
     if spec.get("enableAceMusic"):
-        _emit_progress("ACE_STEP", 74, "Generating an original 120 BPM synchronized score with ACE-Step.")
+        _emit_progress("ACE_STEP", 74, f"Generating and selecting an original {int(spec.get('musicBpm') or 96)} BPM synchronized score with ACE-Step.")
         soundtrack_path = _generate_ace_music(spec, work_dir)
         arguments.extend(("-stream_loop", "-1", "-t", f"{total_duration:.3f}", "-i", str(soundtrack_path)))
     else:
@@ -337,30 +429,39 @@ def compose(spec: dict) -> dict:
             f":s=48000:d={total_duration:.3f}"
         )
         arguments.extend(("-f", "lavfi", "-t", f"{total_duration:.3f}", "-i", soundtrack))
+    sound_design_path = _generate_sound_design(spec, work_dir)
+    sound_design_index = audio_index + 1
+    arguments.extend(("-i", str(sound_design_path)))
     filters.append(f"{''.join(labels)}concat=n={len(shots)}:v=1:a=0[outv]")
     fade_out_start = max(0.0, total_duration - 1.2)
     narration_text = str(spec.get("narrationText") or "").strip()
     if narration_text:
         narration_path = _generate_kokoro_narration(spec, work_dir)
-        narration_index = audio_index + 1
+        narration_index = audio_index + 2
         arguments.extend(("-i", str(narration_path)))
         filters.extend((
             f"[{audio_index}:a]volume=0.58[music]",
+            f"[{sound_design_index}:a]volume=0.82[sfx]",
+            f"[music][sfx]amix=inputs=2:duration=first:dropout_transition=0[bed]",
             f"[{narration_index}:a]adelay=1500|1500,volume=1.0[voice]",
-            f"[music][voice]amix=inputs=2:duration=first:dropout_transition=1,"
-            f"loudnorm=I=-16:TP=-1.5:LRA=9,afade=t=in:st=0:d=1.2,"
+            f"[bed][voice]amix=inputs=2:duration=first:dropout_transition=1,"
+            f"loudnorm=I=-16:TP=-1.5:LRA=9,aresample=48000,afade=t=in:st=0:d=1.2,"
             f"afade=t=out:st={fade_out_start:.3f}:d=1.2[outa]",
         ))
     else:
-        filters.append(
-            f"[{audio_index}:a]loudnorm=I=-16:TP=-1.5:LRA=9,"
+        filters.extend((
+            f"[{audio_index}:a]volume=0.88[music]",
+            f"[{sound_design_index}:a]volume=0.82[sfx]",
+            f"[music][sfx]amix=inputs=2:duration=first:dropout_transition=0,"
+            f"loudnorm=I=-16:TP=-1.5:LRA=9,aresample=48000,"
             f"afade=t=in:st=0:d=1.2,afade=t=out:st={fade_out_start:.3f}:d=1.2[outa]"
-        )
+        ))
     arguments.extend((
         "-filter_complex", ";".join(filters), "-map", "[outv]", "-map", "[outa]",
         "-c:v", "libx264", "-preset", spec.get("preset", "medium"),
         "-crf", str(spec.get("crf", 22)), "-t", f"{float(spec['durationSeconds']):.3f}",
-        "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", str(output_path),
+        "-c:a", "aac", "-b:a", "192k", "-ar", str(int(spec.get("audioSampleRate", 48000))),
+        "-shortest", "-movflags", "+faststart", str(output_path),
     ))
     _emit_progress("FINAL_EDIT", 79, "Assembling the beat-synchronized edit and final audio mix.")
     _run(arguments)

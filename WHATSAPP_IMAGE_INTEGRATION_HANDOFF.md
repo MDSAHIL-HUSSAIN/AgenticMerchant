@@ -1,0 +1,210 @@
+# Agentic ↔ WhatsApp Image Integration Handoff
+
+Last updated: 29 October 2026 (Asia/Calcutta)
+
+This document records the completed WhatsApp image-post integration and the deployed state so work can resume without reconstructing the implementation history. It intentionally contains no secret values.
+
+## Current deployed state
+
+### Agentic image API
+
+- GitHub: `https://github.com/MDSAHIL-HUSSAIN/AgenticMerchant`
+- Verified commit: `69f8b34064e72e29fe043f5fd43723ed621870dc`
+- Render: `https://agentic-image-api.onrender.com`
+- Health: `GET /health` returns HTTP 200.
+- Deployment mode: `DEMO_MODE=true`, `DESIGN_COUNT=1`, `VIDEO_POST_ENABLED=false`.
+- Rendering: the merchant's uploaded product image is used by the deterministic SVG/Sharp renderer and QA loop. Hosted Gemini, Cloudflare, Pixabay and other optional providers are not configured.
+- Storage: `/tmp/agentic-data` on the Render free service. This is ephemeral and suitable for integration testing, not durable production use.
+
+### WhatsApp service
+
+- GitHub: `https://github.com/Codechefskj/whatsapp_bot`
+- Verified deployed branch commit: `648d8c4d7fcf133e8bd80f557ae255b4587f0f14`
+- Render: `https://whatsapp-bot-1lmp.onrender.com`
+- Health: `GET /health` returns HTTP 200.
+- PostgreSQL migration `20261029170000_agentic_integration` is present and applied.
+- Startup was verified with:
+
+```text
+Config loaded
+WhatsApp routes loaded
+Durable Agentic integration worker started
+Server running on port 10000
+```
+
+### Verification completed
+
+- A real WhatsApp demo completed successfully.
+- Incoming Meta messages reached the deployed WhatsApp webhook.
+- The durable worker processed the message.
+- The WhatsApp service called Agentic.
+- Agentic rendered an image preview.
+- The preview returned to WhatsApp with approval controls.
+- Both services' health endpoints return HTTP 200.
+- Both internal integration endpoints reject unauthenticated requests with HTTP 401.
+
+## End-to-end request flow
+
+```text
+Merchant sends product image + caption
+  -> Meta WhatsApp Cloud API
+  -> POST https://whatsapp-bot-1lmp.onrender.com/whatsapp/webhook
+  -> verify x-hub-signature-256
+  -> deduplicate WhatsApp message ID
+  -> persist IntegrationJob in PostgreSQL
+  -> return HTTP 200 to Meta
+  -> background worker downloads Meta media
+  -> POST https://agentic-image-api.onrender.com/api/integrations/whatsapp/messages
+  -> Agentic creates/updates product draft
+  -> clarification response OR render + QA
+  -> POST https://whatsapp-bot-1lmp.onrender.com/whatsapp/integrations/agentic/previews
+  -> bot uploads preview to Meta
+  -> merchant receives preview with Approved / Not approved buttons
+```
+
+### Agentic inbound message endpoint
+
+```http
+POST /api/integrations/whatsapp/messages
+Authorization: Bearer <INTERNAL_SERVICE_TOKEN>
+Content-Type: multipart/form-data
+```
+
+Multipart fields:
+
+- `metadata`: merchant number, conversation ID, WhatsApp message ID, optional draft/question IDs and media roles.
+- `text`: image caption or merchant message.
+- `media`: downloaded product image.
+
+Agentic returns either `clarification_required` or `design_ready`. WhatsApp stores the pending clarification against the merchant phone number and routes the next answer to the same draft.
+
+### Agentic preview callback
+
+```http
+POST /whatsapp/integrations/agentic/previews
+Authorization: Bearer <INTERNAL_SERVICE_TOKEN>
+Content-Type: multipart/form-data
+```
+
+Agentic sends `metadata` plus `preview_1`. The handoff key is based on Agentic job + revision and is idempotent.
+
+### Approval/edit callback
+
+```http
+POST /api/integrations/whatsapp/jobs/:jobId/feedback
+Authorization: Bearer <INTERNAL_SERVICE_TOKEN>
+Content-Type: application/json
+```
+
+Approval payload:
+
+```json
+{
+  "action": "APPROVE_ALL",
+  "messageId": "<WhatsApp message ID>"
+}
+```
+
+Edit payload:
+
+```json
+{
+  "action": "EDIT_SELECTED",
+  "feedback": "<merchant feedback>",
+  "messageId": "<WhatsApp message ID>"
+}
+```
+
+Agentic creates an immutable revision, reruns QA, and sends the revised preview through the same preview callback. Approval creates platform exports; publishing remains unconfigured unless a publishing receiver is added.
+
+## Configuration contract
+
+### Agentic Render environment
+
+```env
+DEMO_MODE=true
+DESIGN_COUNT=1
+VIDEO_POST_ENABLED=false
+DATA_DIR=/tmp/agentic-data
+STATE_DB_PATH=/tmp/agentic-data/agentic-state.sqlite
+WHATSAPP_HANDOFF_URL=https://whatsapp-bot-1lmp.onrender.com/whatsapp/integrations/agentic/previews
+INTERNAL_SERVICE_TOKEN=<shared secret>
+```
+
+### WhatsApp Render environment
+
+```env
+AGENTIC_API_URL=https://agentic-image-api.onrender.com
+INTERNAL_SERVICE_TOKEN=<same shared secret>
+DATABASE_URL=<existing PostgreSQL URL>
+META_ACCESS_TOKEN=<Meta token>
+META_PHONE_NUMBER_ID=<Meta phone number ID>
+META_VERIFY_TOKEN=<webhook verification token>
+META_APP_SECRET=<Meta app secret>
+NODE_ENV=production
+```
+
+The shared internal token is generated by the team, not Meta. Never reuse `META_VERIFY_TOKEN`. A token appeared in an earlier screenshot; verify that the currently deployed token was rotated in both services. Do not place any token in Git, documentation, screenshots or chat.
+
+The WhatsApp Render start command must apply migrations before starting:
+
+```text
+npx prisma migrate deploy && node dist/index.js
+```
+
+## Relevant implementation files
+
+### Agentic repository
+
+- `apps/api/src/server.js` — authenticated integration routes.
+- `apps/api/src/whatsapp-integration.js` — draft, render, preview, approval and revision orchestration.
+- `apps/api/src/drafts.js` — multimodal draft and clarification state.
+- `apps/api/src/handoff.js` — authenticated multipart preview delivery.
+- `apps/api/src/state-db.js` — persisted drafts and idempotent integration responses.
+- `apps/api/src/revisions.js` — immutable merchant-feedback revisions.
+- `apps/api/test/workflow.test.js` — mocked idempotent WhatsApp image integration test.
+- `render.yaml` — Render image-API Blueprint.
+
+### WhatsApp repository
+
+- `src/routes/whatsapp.routes.ts` — Meta webhook, image intake and Agentic preview receiver.
+- `src/services/whatsapp.service.ts` — Meta send/upload/download operations.
+- `src/services/agentic.service.ts` — authenticated Agentic client.
+- `src/services/integration-worker.ts` — durable polling worker and bounded retries.
+- `src/services/integration-jobs.service.ts` — persistent job enqueue/recovery helpers.
+- `src/services/Design.service.ts` — approval state and Agentic callback enqueue.
+- `prisma/schema.prisma` — `IntegrationJob`, `ConversationSession`, and idempotent design handoff fields.
+- `prisma/migrations/20261029170000_agentic_integration/migration.sql` — deployed database migration.
+
+The local `apps/whatsapp-bot` checkout is ignored by the Agentic repository because it is a separate Git repository. Before making future WhatsApp changes, update or freshly clone the teammate repository rather than blindly committing the older local working tree.
+
+## Remaining work
+
+### Immediate hardening
+
+1. Confirm the previously exposed `INTERNAL_SERVICE_TOKEN` was rotated in both Render services.
+2. Upgrade the WhatsApp repository's deployed dependencies. Commit `648d8c4` still declares `axios ^1.13.2` and `multer ^1.4.5-lts.2`; the earlier deploy audit reported five vulnerabilities. The local integration copy contains upgraded dependency files that previously audited clean.
+3. Add automated tests in the WhatsApp repository for signed Meta image webhooks, clarification routing, retry recovery, preview idempotency and approval/edit callbacks.
+
+### Production durability
+
+1. Move Agentic jobs/drafts from ephemeral SQLite to durable PostgreSQL.
+2. Move Agentic binary previews/final exports from local `/tmp` files to private object storage.
+3. Add retention policies, dead-letter inspection and operational monitoring.
+
+### Product expansion
+
+1. Enable optional hosted visual intelligence only after adding provider keys securely in Render.
+2. Add inbound voice/audio and document handling after the image flow remains stable.
+3. Configure `PUBLISHING_HANDOFF_URL` or dedicated Facebook/Instagram/Shopify adapters when publishing teams provide their final contracts.
+4. Keep the local FramePack/RIFE/Real-ESRGAN video pipeline separate; the Render image service intentionally has video disabled.
+
+## Resume checklist
+
+1. Read this file and `PROJECT_HANDOFF.md`.
+2. Check both `/health` endpoints.
+3. Fetch the latest `main` branch of both repositories and record their new commit hashes.
+4. Confirm the two services have matching internal tokens without revealing their values.
+5. Confirm the WhatsApp startup log includes `Durable Agentic integration worker started`.
+6. Re-run image + caption -> revision -> approval using a test WhatsApp recipient before changing production behavior.
+7. Do not run live social publishing without explicit authorization.

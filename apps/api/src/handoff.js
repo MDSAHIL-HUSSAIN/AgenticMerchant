@@ -18,6 +18,10 @@ function facebookConfigured() {
   );
 }
 
+function instagramConfigured() {
+  return Boolean(config.instagramPublishUrl && config.instagramPublishApiKey);
+}
+
 function cloudinarySignature(params) {
   const serialized = Object.entries(params)
     .sort(([left], [right]) => left.localeCompare(right))
@@ -85,6 +89,41 @@ export async function deliverFacebookAsset(job) {
     facebookPostId: publisher.result?.facebook_post_id || publisher.facebook_post_id || null,
     facebookPhotoId: publisher.result?.facebook_photo_id || publisher.facebook_photo_id || null,
     publisher
+  };
+}
+
+export async function deliverInstagramImage(job) {
+  if (!instagramConfigured()) return { status: "NOT_CONFIGURED", deliveredAt: null, channel: "instagram" };
+  if (job.type === "VIDEO_POST") return { status: "NOT_CONFIGURED", deliveredAt: null, channel: "instagram" };
+  const asset = (job.finalAssets || []).find(item => item.platform === "instagram_portrait");
+  if (!asset) throw new Error("The approved job has no instagram_portrait export.");
+  const { record, bytes } = await readMedia(asset.assetId);
+  const form = new FormData();
+  form.append("file", new Blob([bytes], { type: record.mimeType }), record.filename);
+  const response = await fetch(config.instagramPublishUrl, {
+    method: "POST",
+    headers: {
+      "X-API-Key": config.instagramPublishApiKey,
+      "idempotency-key": `instagram:${job.id}:${job.currentRevisionId}`
+    },
+    body: form,
+    // The teammate service waits for Instagram's media container to finish.
+    signal: AbortSignal.timeout(420_000)
+  });
+  const text = await response.text();
+  let payload = {};
+  try { payload = text ? JSON.parse(text) : {}; } catch { payload = { raw: text.slice(0, 500) }; }
+  if (!response.ok || payload.ok === false || !payload.instagram_post_id) {
+    throw new Error(`Instagram publisher failed (${response.status}): ${String(payload.error || text || "unknown response").slice(0, 300)}`);
+  }
+  return {
+    status: "DELIVERED",
+    channel: "instagram",
+    deliveredAt: new Date().toISOString(),
+    instagramPostId: payload.instagram_post_id,
+    postType: payload.type || "image",
+    caption: payload.caption || null,
+    publisher: payload
   };
 }
 
@@ -170,6 +209,16 @@ export async function deliverPublishingAssets(job) {
       deliverFacebookAsset(job).catch(error => ({
         status: "FAILED",
         channel: "facebook",
+        deliveredAt: null,
+        error: error.message
+      }))
+    );
+  }
+  if (job.type !== "VIDEO_POST" && instagramConfigured()) {
+    attempts.push(
+      deliverInstagramImage(job).catch(error => ({
+        status: "FAILED",
+        channel: "instagram",
         deliveredAt: null,
         error: error.message
       }))

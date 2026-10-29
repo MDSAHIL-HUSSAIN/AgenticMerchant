@@ -217,6 +217,8 @@ Configure the receiver with `PUBLISHING_HANDOFF_URL`. Both handoff adapters can 
 
 The prototype can also work with the Facebook teammate's current publisher without changing that repository. Configure `FACEBOOK_CLOUDINARY_CLOUD_NAME`, `FACEBOOK_CLOUDINARY_API_KEY`, `FACEBOOK_CLOUDINARY_API_SECRET`, `FACEBOOK_PUBLISH_URL`, and `FACEBOOK_PUBLISH_SECRET`. On approval, the service uploads the one approved `facebook_feed` PNG to the dedicated Facebook Cloudinary account and only then calls the existing `/api/publish` trigger. Upload and publishing are sequential because the existing publisher selects the newest untagged Cloudinary image. When `PUBLISHING_HANDOFF_URL` is configured, the same approval sends the complete platform-tagged binary export set to the shared publishing receiver for the other services.
 
+For the teammate's Instagram image publisher, configure `INSTAGRAM_PUBLISH_URL` and `INSTAGRAM_PUBLISH_API_KEY`. Approval sends only the `instagram_portrait` export as multipart field `file` with the shared key in `X-API-Key`. The teammate service generates the caption when none is supplied and returns `instagram_post_id`, which Agentic records in the publishing handoff. Reel delivery remains disabled in this adapter until the video workflow is explicitly integrated.
+
 ## Optional Adobe manual editing
 
 `EDIT_MANUALLY` creates an Adobe queue item. In add-on version 1.2.0:

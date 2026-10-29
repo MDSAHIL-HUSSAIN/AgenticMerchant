@@ -197,3 +197,62 @@ test("uploads the single Facebook export to Cloudinary before triggering the unc
   assert.equal(delivery.status, "DELIVERED");
   assert.equal(delivery.deliveries[0].facebookPostId, "post-123");
 });
+
+test("sends only the approved portrait image to the Instagram publisher", async t => {
+  const job = await makeJob();
+  const original = {
+    instagramUrl: config.instagramPublishUrl,
+    instagramKey: config.instagramPublishApiKey,
+    facebookCloudName: config.facebookCloudinaryCloudName,
+    facebookApiKey: config.facebookCloudinaryApiKey,
+    facebookApiSecret: config.facebookCloudinaryApiSecret,
+    facebookUrl: config.facebookPublishUrl,
+    facebookSecret: config.facebookPublishSecret,
+    genericUrl: config.publishingHandoffUrl,
+    fetch: globalThis.fetch
+  };
+  t.after(() => {
+    config.instagramPublishUrl = original.instagramUrl;
+    config.instagramPublishApiKey = original.instagramKey;
+    config.facebookCloudinaryCloudName = original.facebookCloudName;
+    config.facebookCloudinaryApiKey = original.facebookApiKey;
+    config.facebookCloudinaryApiSecret = original.facebookApiSecret;
+    config.facebookPublishUrl = original.facebookUrl;
+    config.facebookPublishSecret = original.facebookSecret;
+    config.publishingHandoffUrl = original.genericUrl;
+    globalThis.fetch = original.fetch;
+  });
+  config.instagramPublishUrl = "https://jiit-hackathon.example/api/post";
+  config.instagramPublishApiKey = "instagram-shared-key";
+  config.facebookCloudinaryCloudName = "";
+  config.facebookCloudinaryApiKey = "";
+  config.facebookCloudinaryApiSecret = "";
+  config.facebookPublishUrl = "";
+  config.facebookPublishSecret = "";
+  config.publishingHandoffUrl = "";
+  let call = 0;
+  globalThis.fetch = async (url, options) => {
+    call += 1;
+    assert.equal(url, config.instagramPublishUrl);
+    assert.equal(options.method, "POST");
+    assert.equal(options.headers["X-API-Key"], "instagram-shared-key");
+    assert.equal(options.headers["idempotency-key"], `instagram:${job.id}:${job.currentRevisionId}`);
+    assert.ok(options.body instanceof FormData);
+    assert.deepEqual([...options.body.keys()], ["file"]);
+    const file = options.body.get("file");
+    assert.ok(file instanceof Blob);
+    assert.equal(file.type, "image/png");
+    return new Response(JSON.stringify({
+      ok: true,
+      type: "image",
+      instagram_post_id: "ig-post-789",
+      caption: "A new cotton kurti. #newarrival"
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const approved = await approveDesigns(job.id, { designIds: ["design_1"], idempotencyKey: `instagram-approve-${job.id}` });
+  assert.equal(call, 1);
+  const delivery = approved.handoffs.find(item => item.type === "PUBLISHING");
+  assert.equal(delivery.status, "DELIVERED");
+  assert.equal(delivery.deliveries[0].channel, "instagram");
+  assert.equal(delivery.deliveries[0].instagramPostId, "ig-post-789");
+});

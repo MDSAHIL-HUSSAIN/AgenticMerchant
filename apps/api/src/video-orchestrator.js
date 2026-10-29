@@ -5,7 +5,7 @@ import { composeVideoPreview } from "./video-compositor.js";
 import { getJob, listJobs, registerJob, saveJob } from "./job-store.js";
 import { gpuTaskQueue } from "./task-queue.js";
 import { createAutonomousVideoPlan, normalizeVideoPlan } from "./video-planner.js";
-import { inspectVideoPlan, inspectVideoPreview } from "./video-quality.js";
+import { inspectVideoKeyframes, inspectVideoPlan, inspectVideoPreview } from "./video-quality.js";
 import { renderVideoKeyframes } from "./video-renderer.js";
 import { getMediaRecord } from "./media-store.js";
 
@@ -60,6 +60,9 @@ async function executeVideoJob(job, { signal, planOverride, feedback, source = "
     publish(job, "GENERATING_KEYFRAMES", 18, "Rendering controlled vertical keyframes.");
     const keyframes = await renderVideoKeyframes({ jobId: job.id, brief: job.brief, plan: job.videoSpec, productAssetIds: job.productAssetIds });
     job.keyframeAssets = keyframes;
+    saveJob(job);
+    const keyframeReview = await inspectVideoKeyframes(keyframes);
+    if (!keyframeReview.passed) throw new Error(`Video keyframes failed creative QA: ${keyframeReview.issues.map(issue => issue.code).join(", ")}`);
     job.videoSpec.shots = job.videoSpec.shots.map((shot, index) => ({ ...shot, productAssetIds: [...job.productAssetIds], referenceAssetIds: [...job.referenceAssetIds], startKeyframeAssetId: keyframes[index]?.assetId, status: "KEYFRAME_READY" }));
     saveJob(job);
 
@@ -88,7 +91,7 @@ async function executeVideoJob(job, { signal, planOverride, feedback, source = "
         height: config.videoPreviewHeight
       });
     }
-    job.qa = { passed: planReview.passed && previewReview.passed, score: Math.round((planReview.score + previewReview.score) / 2), plan: planReview, preview: previewReview, repairs, issues: [...planReview.issues, ...previewReview.issues] };
+    job.qa = { passed: planReview.passed && keyframeReview.passed && previewReview.passed, score: Math.round((planReview.score + keyframeReview.score + previewReview.score) / 3), plan: planReview, keyframes: keyframeReview, preview: previewReview, repairs, issues: [...planReview.issues, ...keyframeReview.issues, ...previewReview.issues] };
     if (!job.qa.passed) throw new Error(`Video preview failed QA: ${job.qa.issues.map(issue => issue.code).join(", ")}`);
 
     job.status = "AWAITING_APPROVAL";

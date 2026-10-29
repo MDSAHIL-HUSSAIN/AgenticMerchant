@@ -41,14 +41,26 @@ export async function composeVideoPreview({ jobId, plan, keyframes, signal, onPr
         fps: plan.fps,
         durationSeconds: plan.durationSeconds,
         enableGenerativeMotion: config.videoGenerativeMotion,
-        enableInterpolation: config.videoUseRife,
+        enableInterpolation: config.videoUseRife && plan.fps >= 50,
         enableUpscale: config.videoUseRealEsrgan,
         enableAceMusic: config.videoUseAceMusic,
-        musicPrompt: `${plan.musicDirection} Premium original instrumental advertisement score, 120 BPM, clear four-beat phrasing, evolving arrangement, emotional lift at the midpoint, decisive final resolve, no vocals, no copyrighted melody.`,
-        musicBpm: 120,
+        musicPrompt: [
+          plan.musicDirection,
+          `Mood: ${plan.music?.mood || plan.tone}.`,
+          `Instrumentation: ${(plan.music?.instruments || []).join(", ")}.`,
+          `Structure: ${plan.music?.energyCurve || "restrained opening, hero lift, clean resolve"}.`,
+          `Avoid: ${(plan.music?.avoid || ["vocals", "generic corporate music"]).join(", ")}.`,
+          "Premium original instrumental product-film score with clear edit points and no copyrighted melody."
+        ].join(" "),
+        musicMood: plan.music?.mood || plan.tone,
+        musicBpm: plan.music?.bpm || 96,
+        musicKeyscale: plan.music?.keyscale || "D minor",
+        musicTimesignature: plan.music?.timesignature || "4/4",
+        musicCandidateCount: 2,
         musicSeed: plan.shots[0]?.seed || 20261029,
         narrationText: plan.narration?.enabled ? plan.narration.script : "",
-        crf: 24,
+        audioSampleRate: 48_000,
+        crf: 21,
         shots: keyframes.map((frame, index) => ({
           path: getMediaPath(frame.assetId),
           sourceImagePath: plan.shots[index].sceneType === "PEOPLE"
@@ -62,7 +74,9 @@ export async function composeVideoPreview({ jobId, plan, keyframes, signal, onPr
           renderMode: plan.shots[index].renderMode,
           prompt: plan.shots[index].prompt,
           negativePrompt: plan.shots[index].negativePrompt,
-          seed: plan.shots[index].seed
+          seed: plan.shots[index].seed,
+          musicCue: plan.shots[index].musicCue,
+          soundCues: plan.shots[index].soundCues
         }))
       }, { signal, onProgress });
     } else {
@@ -95,7 +109,7 @@ export async function composeVideoPreview({ jobId, plan, keyframes, signal, onPr
     mimeType: "image/png",
     filename: `${jobId}-poster.png`,
     kind: "VIDEO_POSTER",
-    metadata: { videoJobId: jobId, width: config.videoPreviewWidth, height: config.videoPreviewHeight }
+    metadata: { videoJobId: jobId, width: keyframes[Math.min(2, keyframes.length - 1)].width || config.videoFinalWidth, height: keyframes[Math.min(2, keyframes.length - 1)].height || config.videoFinalHeight }
   });
   return {
     video: { assetId: video.id, mimeType: video.mimeType, byteLength: video.byteLength, kind: video.kind },
