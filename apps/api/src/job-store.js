@@ -2,6 +2,23 @@ import { loadJobs, persistJob } from "./state-db.js";
 
 const jobs = new Map(loadJobs().map(job => [job.id, job]));
 
+const sensitiveKey = /(?:authorization|api[-_]?key|access[-_]?token|secret|password|signature)/i;
+
+function safeLogValue(value, key = "") {
+  if (sensitiveKey.test(key)) return "[REDACTED]";
+  if (typeof value === "string") {
+    return value
+      .replace(/(bearer\s+)[^\s]+/gi, "$1[REDACTED]")
+      .replace(/([?&](?:access_token|api_key|key|signature)=)[^&\s]+/gi, "$1[REDACTED]")
+      .slice(0, 1000);
+  }
+  if (Array.isArray(value)) return value.slice(0, 30).map(item => safeLogValue(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).slice(0, 40).map(([childKey, childValue]) => [childKey, safeLogValue(childValue, childKey)]));
+  }
+  return value;
+}
+
 function initialRevision(job) {
   if ((job.type || "IMAGE_POST") === "VIDEO_POST") {
     return {
@@ -46,6 +63,7 @@ export function registerJob(rawJob, context = {}) {
     approvedDesignIds: [],
     finalAssets: [],
     handoffs: [],
+    activityLogs: Array.isArray(rawJob.activityLogs) ? rawJob.activityLogs : [],
     processedKeys: [],
     updatedAt: new Date().toISOString()
   };
@@ -65,6 +83,32 @@ export function saveJob(job) {
   jobs.set(job.id, job);
   persistJob(job);
   return job;
+}
+
+export function appendJobLog(job, {
+  stage = "WORKFLOW",
+  status = "INFO",
+  channel = "pipeline",
+  message,
+  details = null
+} = {}) {
+  if (!job || !message) return null;
+  if (!Array.isArray(job.activityLogs)) job.activityLogs = [];
+  const entry = {
+    id: `log_${crypto.randomUUID()}`,
+    sequence: job.activityLogs.length ? Number(job.activityLogs.at(-1).sequence || job.activityLogs.length) + 1 : 1,
+    at: new Date().toISOString(),
+    stage: String(stage),
+    status: String(status).toUpperCase(),
+    channel: String(channel),
+    message: String(message).slice(0, 1000),
+    ...(details ? { details: safeLogValue(details) } : {})
+  };
+  job.activityLogs.push(entry);
+  if (job.activityLogs.length > 500) job.activityLogs.splice(0, job.activityLogs.length - 500);
+  console.log(JSON.stringify({ event: "job.activity", jobId: job.id, ...entry }));
+  saveJob(job);
+  return entry;
 }
 
 export function listJobs({ type, statuses } = {}) {

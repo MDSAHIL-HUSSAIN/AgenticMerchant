@@ -2,12 +2,14 @@ import { EventEmitter } from "node:events";
 import { validateBrief } from "./brief.js";
 import { config } from "./config.js";
 import { composeVideoPreview } from "./video-compositor.js";
-import { getJob, listJobs, registerJob, saveJob } from "./job-store.js";
+import { appendJobLog, getJob, listJobs, registerJob, saveJob } from "./job-store.js";
 import { gpuTaskQueue } from "./task-queue.js";
 import { createAutonomousVideoPlan, normalizeVideoPlan } from "./video-planner.js";
 import { inspectVideoKeyframes, inspectVideoPlan, inspectVideoPreview } from "./video-quality.js";
 import { renderVideoKeyframes } from "./video-renderer.js";
-import { getMediaRecord } from "./media-store.js";
+import { getMediaRecord, storeMedia } from "./media-store.js";
+import { inspectVideoVisuals } from "./video-visual-review.js";
+import { applyTargetedVideoRepairs } from "./video-timeline.js";
 
 const events = new EventEmitter();
 events.setMaxListeners(100);
@@ -20,7 +22,13 @@ function publish(job, stage, progress, message, extra = {}) {
   if (log.length > 100) log.splice(0, log.length - 100);
   history.set(job.id, log);
   job.progress = event;
-  saveJob(job);
+  appendJobLog(job, {
+    stage,
+    status: stage === "FAILED" ? "FAILED" : stage === "CANCELLED" ? "CANCELLED" : stage === "AWAITING_APPROVAL" ? "SUCCESS" : /FALLBACK|REPAIR/.test(stage) ? "WARNING" : "RUNNING",
+    channel: "video",
+    message,
+    details: { progress, ...extra }
+  });
   events.emit(job.id, event);
   return event;
 }
@@ -33,6 +41,8 @@ function revisionFromJob(job, { source, feedback = null } = {}) {
     creativeTreatment: structuredClone(job.creativeTreatment),
     videoSpec: structuredClone(job.videoSpec),
     previewAssets: structuredClone(job.previewAssets),
+    productionArtifacts: structuredClone(job.productionArtifacts || []),
+    editor: structuredClone(job.editor || null),
     qa: structuredClone(job.qa),
     feedback,
     createdAt: new Date().toISOString()
@@ -70,7 +80,10 @@ async function executeVideoJob(job, { signal, planOverride, feedback, source = "
     publish(job, "GENERATING_MOTION", 42, "Generating and assembling the preview frame sequences.");
     const modelProgress = event => publish(job, event.stage, event.progress, event.message);
     let preview = await composeVideoPreview({ jobId: job.id, plan: job.videoSpec, keyframes, signal, onProgress: modelProgress });
-    job.previewAssets = [preview.video, preview.poster];
+    job.previewAssets = [preview.video, preview.poster, ...(preview.timelineArtifact ? [preview.timelineArtifact] : [])];
+    job.productionArtifacts = [...(job.productionArtifacts || []), ...(preview.timelineArtifact ? [preview.timelineArtifact] : [])];
+    job.editor = preview.editorReport;
+    if (preview.editorReport?.warning) job.warnings.push(`Remotion editor used FFmpeg fallback: ${preview.editorReport.warning}`);
 
     job.status = "RUNNING_TEMPORAL_QA";
     publish(job, "RUNNING_TEMPORAL_QA", 82, "Evaluating duration, frame output and delivery assets.");
@@ -84,15 +97,74 @@ async function executeVideoJob(job, { signal, planOverride, feedback, source = "
       repairs += 1;
       publish(job, "REPAIRING_TIMELINE", 86, "Correcting the rendered timeline and rerunning temporal QA.");
       preview = await composeVideoPreview({ jobId: job.id, plan: job.videoSpec, keyframes, signal, onProgress: modelProgress });
-      job.previewAssets = [preview.video, preview.poster];
+      job.previewAssets = [preview.video, preview.poster, ...(preview.timelineArtifact ? [preview.timelineArtifact] : [])];
+      job.productionArtifacts.push(...(preview.timelineArtifact ? [preview.timelineArtifact] : []));
+      job.editor = preview.editorReport;
       previewReview = await inspectVideoPreview(preview.video.assetId, {
         durationSeconds: job.videoSpec.durationSeconds,
         width: config.videoPreviewWidth,
         height: config.videoPreviewHeight
       });
     }
-    job.qa = { passed: planReview.passed && keyframeReview.passed && previewReview.passed, score: Math.round((planReview.score + keyframeReview.score + previewReview.score) / 3), plan: planReview, keyframes: keyframeReview, preview: previewReview, repairs, issues: [...planReview.issues, ...keyframeReview.issues, ...previewReview.issues] };
+    publish(job, "RUNNING_VISUAL_QA", 88, "Inspecting story frames, composition, product presence, typography and edit continuity.");
+    let visualReview = await inspectVideoVisuals({ jobId: job.id, assetId: preview.video.assetId, plan: job.videoSpec, brief: job.brief, pass: 1 });
+    if (visualReview.artifact) job.productionArtifacts.push(visualReview.artifact);
+    if (visualReview.warning) job.warnings.push(visualReview.warning);
+    const visualRepairHistory = [];
+    let visualRepairs = 0;
+    while (!visualReview.passed && visualRepairs < config.maxVideoVisualRepairs) {
+      const targeted = applyTargetedVideoRepairs(job.videoSpec, visualReview.issues);
+      if (!targeted.actions.length) break;
+      visualRepairs += 1;
+      repairs += 1;
+      visualRepairHistory.push({ pass: visualRepairs, actions: targeted.actions, affectedShotIds: targeted.affectedShotIds });
+      job.videoSpec = targeted.plan;
+      publish(job, "REPAIRING_VISUAL_EDIT", 89 + visualRepairs, `Applying ${targeted.actions.length} targeted visual repair${targeted.actions.length === 1 ? "" : "s"} and rerendering affected compositions.`, { affectedShotIds: targeted.affectedShotIds });
+      const repairedKeyframes = await renderVideoKeyframes({ jobId: job.id, brief: job.brief, plan: job.videoSpec, productAssetIds: job.productAssetIds, existingKeyframes: job.keyframeAssets, onlyShotIds: targeted.affectedShotIds });
+      job.keyframeAssets = repairedKeyframes;
+      job.videoSpec.shots = job.videoSpec.shots.map((shot, index) => ({ ...shot, productAssetIds: [...job.productAssetIds], referenceAssetIds: [...job.referenceAssetIds], startKeyframeAssetId: repairedKeyframes[index]?.assetId, status: "KEYFRAME_READY" }));
+      preview = await composeVideoPreview({ jobId: job.id, plan: job.videoSpec, keyframes: repairedKeyframes, signal, onProgress: modelProgress });
+      job.previewAssets = [preview.video, preview.poster, ...(preview.timelineArtifact ? [preview.timelineArtifact] : [])];
+      job.productionArtifacts.push(...(preview.timelineArtifact ? [preview.timelineArtifact] : []));
+      job.editor = preview.editorReport;
+      previewReview = await inspectVideoPreview(preview.video.assetId, { durationSeconds: job.videoSpec.durationSeconds, width: config.videoPreviewWidth, height: config.videoPreviewHeight });
+      visualReview = await inspectVideoVisuals({ jobId: job.id, assetId: preview.video.assetId, plan: job.videoSpec, brief: job.brief, pass: visualRepairs + 1 });
+      if (visualReview.artifact) job.productionArtifacts.push(visualReview.artifact);
+      if (visualReview.warning) job.warnings.push(visualReview.warning);
+      saveJob(job);
+    }
+    const motionSelections = preview.workerReport?.motionSelections || [];
+    const expectedMotionSelections = config.videoFastTemplateMode
+      ? 0
+      : job.videoSpec.shots.filter(shot => shot.renderMode === "GENERATIVE").length;
+    const motionIssues = config.videoWorkerMode === "mock" || motionSelections.length === expectedMotionSelections
+      ? []
+      : [{ severity: "high", code: "MISSING_GENERATIVE_MOTION_QA", expected: expectedMotionSelections, actual: motionSelections.length }];
+    const motionReview = {
+      passed: !motionIssues.length && motionSelections.every(selection => selection.accepted && selection.selectedMetrics?.passed),
+      score: motionIssues.length ? 0 : 100,
+      expected: expectedMotionSelections,
+      selections: motionSelections,
+      issues: motionIssues
+    };
+    job.qa = { passed: planReview.passed && keyframeReview.passed && previewReview.passed && motionReview.passed && visualReview.passed, score: Math.round((planReview.score + keyframeReview.score + previewReview.score + motionReview.score + visualReview.score) / 5), plan: planReview, keyframes: keyframeReview, motion: motionReview, preview: previewReview, visual: visualReview, repairs, visualRepairHistory, issues: [...planReview.issues, ...keyframeReview.issues, ...motionReview.issues, ...previewReview.issues, ...visualReview.issues] };
     if (!job.qa.passed) throw new Error(`Video preview failed QA: ${job.qa.issues.map(issue => issue.code).join(", ")}`);
+
+    const productionManifest = {
+      schemaVersion: 2,
+      jobId: job.id,
+      revisionNumber: job.revisionNumber,
+      createdAt: new Date().toISOString(),
+      creativeTreatment: job.creativeTreatment,
+      videoSpec: job.videoSpec,
+      editor: job.editor,
+      previewAssets: job.previewAssets,
+      keyframeAssets: job.keyframeAssets,
+      qa: job.qa,
+      warnings: job.warnings
+    };
+    const productionAsset = await storeMedia({ bytes: Buffer.from(JSON.stringify(productionManifest, null, 2)), mimeType: "application/json", filename: `${job.id}-production-manifest.json`, kind: "VIDEO_PRODUCTION_MANIFEST", metadata: { videoJobId: job.id, revisionNumber: job.revisionNumber, schemaVersion: 2 } });
+    job.productionArtifacts.push({ assetId: productionAsset.id, kind: productionAsset.kind, mimeType: productionAsset.mimeType });
 
     job.status = "AWAITING_APPROVAL";
     publish(job, "AWAITING_APPROVAL", 100, "The autonomous video preview is ready for approval or revision.");
@@ -145,6 +217,7 @@ export function createVideoJob(rawBrief, options = {}, context = {}) {
       aspectRatio: options.aspectRatio || "9:16",
       fps: Number(options.fps) || undefined,
       narrationEnabled: Boolean(options.narrationEnabled),
+      autonomousDuration: options.autonomousDuration !== false && !Number(options.durationSeconds),
       useAi: options.useAi
     },
     productAssetIds,
@@ -153,6 +226,8 @@ export function createVideoJob(rawBrief, options = {}, context = {}) {
     videoSpec: null,
     keyframeAssets: [],
     previewAssets: [],
+    productionArtifacts: [],
+    editor: null,
     qa: null,
     agentic: { autonomous: true, productSource: productAssetIds.length ? "USER_ASSET" : "PLACEHOLDER" },
     warnings: [],

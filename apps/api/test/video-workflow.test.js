@@ -44,6 +44,10 @@ test("creates one autonomous exact-duration video preview with QA evidence", asy
   assert.equal(job.previewAssets.some(asset => asset.mimeType === "video/mp4"), true);
   assert.equal(job.previewAssets.some(asset => asset.mimeType === "image/png"), true);
   assert.equal(job.keyframeAssets.length, job.videoSpec.shots.length);
+  assert.equal(job.videoSpec.shots.filter(shot => shot.renderMode === "GENERATIVE").length >= Math.ceil(job.videoSpec.shots.length * .45), true);
+  assert.equal(job.keyframeAssets.every(asset => asset.motionPlateAssetId && asset.overlayAssetId), true);
+  assert.equal(job.qa.motion.passed, true);
+  assert.equal(job.qa.motion.expected, job.videoSpec.shots.filter(shot => shot.renderMode === "GENERATIVE").length);
   assert.equal(job.revisions.length, 1);
   assert.equal(job.revisions[0].source, "AUTONOMOUS_VIDEO_GENERATION");
 });
@@ -62,7 +66,9 @@ test("keeps every shot duration positive for the shortest supported film", async
   assert.equal(Math.round(plan.shots.reduce((sum, shot) => sum + shot.durationSeconds, 0) * 10) / 10, 8);
   assert.equal(plan.shots.every(shot => shot.durationSeconds > 0), true);
   assert.equal(plan.shots.every(shot => shot.sceneType === "PRODUCT"), true);
-  assert.equal(plan.shots.some(shot => shot.renderMode === "GENERATIVE"), false);
+  assert.equal(plan.shots.filter(shot => shot.renderMode === "GENERATIVE").length >= Math.ceil(plan.shots.length * .45), true);
+  assert.equal(plan.shots[0].renderMode === "GENERATIVE", false);
+  assert.equal(plan.shots.at(-1).renderMode === "GENERATIVE", false);
   assert.equal(plan.shots.every(shot => Number.isFinite(shot.musicCue?.beat)), true);
   assert.equal(plan.music.bpm, 96);
   assert.equal(new Set(plan.shots.map(shot => `${shot.focus.x}:${shot.focus.y}:${shot.focus.zoom}`)).size >= 4, true);

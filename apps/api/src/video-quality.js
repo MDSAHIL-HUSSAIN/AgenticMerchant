@@ -37,16 +37,39 @@ function measureAudioLoudness(assetId) {
   });
 }
 
+function measureFrozenVideo(assetId, durationSeconds) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(config.ffmpegPath, [
+      "-v", "info", "-i", getMediaPath(assetId),
+      "-vf", "freezedetect=n=-50dB:d=0.7", "-an", "-f", "null", "NUL"
+    ], { shell: false, windowsHide: true });
+    let stderr = "";
+    child.stderr.on("data", chunk => { stderr = `${stderr}${chunk}`.slice(-80_000); });
+    child.once("error", reject);
+    child.once("close", code => {
+      if (code !== 0) return reject(new Error(`Freeze analysis exited with ${code}.`));
+      const durations = [...stderr.matchAll(/freeze_duration:\s*([\d.]+)/gi)].map(match => Number(match[1])).filter(Number.isFinite);
+      const starts = [...stderr.matchAll(/freeze_start:\s*([\d.]+)/gi)].map(match => Number(match[1])).filter(Number.isFinite);
+      if (starts.length > durations.length && Number.isFinite(durationSeconds)) durations.push(Math.max(0, durationSeconds - starts.at(-1)));
+      resolve({ segments: durations.length, totalSeconds: durations.reduce((sum, value) => sum + value, 0), longestSeconds: durations.length ? Math.max(...durations) : 0 });
+    });
+  });
+}
+
 export function inspectVideoPlan(plan) {
   const issues = [];
   const total = Math.round(plan.shots.reduce((sum, shot) => sum + Number(shot.durationSeconds || 0), 0) * 10) / 10;
   if (Math.abs(total - plan.durationSeconds) > .05) issues.push({ severity: "high", code: "DURATION_MISMATCH", expected: plan.durationSeconds, actual: total });
-  if (plan.shots.length < 3 || plan.shots.length > 12) issues.push({ severity: "high", code: "INVALID_SHOT_COUNT", actual: plan.shots.length });
+  if (plan.shots.length < 5 || plan.shots.length > 12) issues.push({ severity: "high", code: "INVALID_SHOT_COUNT", actual: plan.shots.length });
   const generativeCount = plan.shots.filter(shot => shot.renderMode === "GENERATIVE").length;
   const productCount = plan.shots.filter(shot => shot.sceneType === "PRODUCT").length;
-  if (generativeCount) issues.push({ severity: "high", code: "PRODUCT_FILM_CONTAINS_GENERATIVE_SCENE", actual: generativeCount });
+  const minimumGenerativeCount = Math.ceil(plan.shots.length * .45);
+  const maximumGenerativeCount = Math.max(minimumGenerativeCount, Math.floor(plan.shots.length * .75));
+  if (!config.videoFastTemplateMode && (generativeCount < minimumGenerativeCount || generativeCount > maximumGenerativeCount)) issues.push({ severity: "high", code: "INVALID_GENERATIVE_SHOT_COUNT", minimum: minimumGenerativeCount, maximum: maximumGenerativeCount, actual: generativeCount });
+  if (plan.shots.at(-1)?.renderMode !== "DETERMINISTIC") issues.push({ severity: "high", code: "UNSAFE_FINAL_LOCKUP" });
   if (productCount !== plan.shots.length) issues.push({ severity: "high", code: "PRODUCT_FILM_CONTAINS_NON_PRODUCT_SCENE", actual: plan.shots.length - productCount });
   if (!plan.storyArc) issues.push({ severity: "high", code: "MISSING_STORY_ARC" });
+  if (plan.schemaVersion !== 2 || plan.editor?.engine !== "remotion" || !plan.timeline?.inspectionMoments?.length) issues.push({ severity: "high", code: "MISSING_EDITABLE_TIMELINE" });
   if (!plan.continuity?.product || !plan.continuity?.lighting) issues.push({ severity: "high", code: "MISSING_CONTINUITY_BIBLE" });
   if (!plan.music?.mood || !plan.music?.energyCurve || !plan.music?.instruments?.length) issues.push({ severity: "high", code: "MISSING_MUSIC_DIRECTION" });
   if (!Number.isFinite(Number(plan.music?.bpm)) || Number(plan.music.bpm) < 60 || Number(plan.music.bpm) > 160) issues.push({ severity: "high", code: "INVALID_MUSIC_BPM" });
@@ -54,7 +77,10 @@ export function inspectVideoPlan(plan) {
   if (focusSignatures.size < Math.min(4, plan.shots.length)) issues.push({ severity: "high", code: "INSUFFICIENT_VISUAL_FRAMING_VARIETY", actual: focusSignatures.size });
   for (const shot of plan.shots) {
     if (!shot.prompt) issues.push({ severity: "high", code: "MISSING_PROMPT", shotId: shot.id });
+    if (!shot.editor?.component || !shot.editor?.motionCurve || !shot.editor?.inspectionMoments?.length) issues.push({ severity: "high", code: "MISSING_EDITING_INSTRUCTIONS", shotId: shot.id });
     if (!shot.renderMode) issues.push({ severity: "high", code: "MISSING_RENDER_MODE", shotId: shot.id });
+    if (!shot.stage?.backgroundStyle || !shot.edit?.style || !shot.edit?.transitionOut) issues.push({ severity: "high", code: "MISSING_DIRECTORIAL_INSTRUCTIONS", shotId: shot.id });
+    if (shot.renderMode === "GENERATIVE" && (!Number.isInteger(shot.generation?.frames) || (shot.generation.frames - 1) % 8 !== 0 || shot.generation?.steps !== 8)) issues.push({ severity: "high", code: "INVALID_LTX_SHOT_PROFILE", shotId: shot.id });
     for (const field of ["composition", "lighting", "cutIntention"]) {
       if (!shot[field]) issues.push({ severity: "high", code: `MISSING_${field.replace(/([A-Z])/g, "_$1").toUpperCase()}`, shotId: shot.id });
     }
@@ -115,6 +141,12 @@ export async function inspectVideoPreview(assetId, expected = {}) {
         if (!Number.isFinite(loudness.meanDb) || loudness.meanDb < -38 || loudness.peakDb < -30) {
           issues.push({ severity: "high", code: "INAUDIBLE_AUDIO_TRACK", ...loudness });
         }
+      }
+      const freeze = await measureFrozenVideo(assetId, probe.durationSeconds);
+      probe.freeze = freeze;
+      const longestAllowed = Math.max(3.5, probe.durationSeconds * .30);
+      if (freeze.longestSeconds > longestAllowed || freeze.totalSeconds > probe.durationSeconds * .48) {
+        issues.push({ severity: "high", code: "EXCESSIVE_FROZEN_VIDEO", ...freeze, longestAllowedSeconds: longestAllowed });
       }
     } catch (error) {
       issues.push({ severity: "high", code: "FFPROBE_FAILED", message: error.message });

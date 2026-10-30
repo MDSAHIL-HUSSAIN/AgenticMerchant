@@ -32,10 +32,12 @@ const brief = validateBrief({
   tone: process.env.SMOKE_PRODUCT_TONE || "warm, editorial, refined",
   callToAction: process.env.SMOKE_PRODUCT_CTA || "Discover the collection"
 });
-const durationSeconds = Math.max(8, Math.min(60, Number(process.env.SMOKE_VIDEO_DURATION || 15)));
+const durationSeconds = process.env.SMOKE_VIDEO_DURATION
+  ? Math.max(8, Math.min(60, Number(process.env.SMOKE_VIDEO_DURATION)))
+  : undefined;
 const fps = [24, 25, 30, 50, 60].includes(Number(process.env.SMOKE_VIDEO_FPS)) ? Number(process.env.SMOKE_VIDEO_FPS) : 24;
 const queued = createVideoJob(brief, {
-  durationSeconds,
+  ...(durationSeconds ? { durationSeconds } : {}),
   fps,
   useAi: String(process.env.SMOKE_USE_AI ?? "true").toLowerCase() !== "false",
   productAssetIds: [product.id]

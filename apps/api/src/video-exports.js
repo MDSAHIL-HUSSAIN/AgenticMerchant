@@ -4,6 +4,8 @@ import { config } from "./config.js";
 import { getMediaPath, readMedia, storeMedia } from "./media-store.js";
 import { runMediaCommand } from "./video-compositor.js";
 import { composeWithVideoWorker } from "./video-worker-client.js";
+import { composeWithRemotion } from "./remotion-client.js";
+import { createTimelineManifest } from "./video-timeline.js";
 
 const formats = [
   { platform: "video_master", width: 1080, height: 1920 },
@@ -26,7 +28,7 @@ export async function createVideoFinalExports(job, { signal } = {}) {
     const exportDir = join(workDir, "exports");
     await mkdir(exportDir, { recursive: true });
     nativeMasterPath = join(exportDir, "video_master.mp4");
-    await composeWithVideoWorker({
+    const workerReport = await composeWithVideoWorker({
       ...previewSpec,
       outputPath: nativeMasterPath,
       width: config.videoFinalWidth,
@@ -35,6 +37,18 @@ export async function createVideoFinalExports(job, { signal } = {}) {
       crf: 17,
       audioSampleRate: 48_000
     }, { signal });
+    if (config.videoEditorEngine === "remotion") {
+      try {
+        const remotionMasterPath = join(exportDir, "video_master-remotion.mp4");
+        const manifest = createTimelineManifest({ jobId: job.id, plan: job.videoSpec, workerReport, keyframes: job.keyframeAssets, audioPath: nativeMasterPath, renderPass: "final" });
+        await composeWithRemotion({ workDir: exportDir, manifest, outputPath: remotionMasterPath, width: config.videoFinalWidth, height: config.videoFinalHeight, signal });
+        nativeMasterPath = remotionMasterPath;
+        const manifestAsset = await storeMedia({ bytes: Buffer.from(JSON.stringify(manifest, null, 2)), mimeType: "application/json", filename: `${job.id}-final-editable-timeline.json`, kind: "VIDEO_EDITABLE_TIMELINE", metadata: { videoJobId: job.id, revisionId: job.currentRevisionId, renderPass: "final", schemaVersion: manifest.schemaVersion } });
+        job.productionArtifacts = [...(job.productionArtifacts || []), { assetId: manifestAsset.id, kind: manifestAsset.kind, mimeType: manifestAsset.mimeType }];
+      } catch (error) {
+        job.warnings = [...(job.warnings || []), `Final Remotion render used the FFmpeg master: ${error.message}`];
+      }
+    }
     nativeMasterBytes = await readFile(nativeMasterPath);
   }
   for (const format of formats) {

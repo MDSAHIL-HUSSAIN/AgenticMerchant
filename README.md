@@ -67,7 +67,7 @@ Start it with:
 npm run demo
 ```
 
-The demo accepts a product brief plus optional product/reference images and creates either one best campaign image or one 30-second product film. Both support revisions, approval, and platform exports. It uses the same private binary asset endpoints as the integration pipeline. With the default `DEMO_MODE=true`, it does not call external image search, Gemini, Cloudflare or other quota-limited providers.
+The demo accepts a product brief plus optional product/reference images and creates either one best campaign image or one autonomously directed product film. Both support revisions, approval, and platform exports. It uses the same private binary asset endpoints as the integration pipeline. With the default `DEMO_MODE=true`, it does not call external image search, Gemini, Cloudflare or other quota-limited providers.
 
 ## Autonomous video posts
 
@@ -77,13 +77,23 @@ Queue a vertical film from an existing product draft:
 POST /api/product-drafts/:id/video
 ```
 
-The optional JSON body accepts `durationSeconds` (8–60), `fps`, `aspectRatio`, and `narrationEnabled`. Read progress from `GET /api/video-jobs/:id` or the SSE endpoint `GET /api/video-jobs/:id/events`. Revision, approval, cancellation, and retry endpoints live under `/api/video-jobs/:id/*`; the generic job feedback and approval routes also dispatch video jobs correctly.
+The optional JSON body accepts `durationSeconds` (8–60), `fps`, `aspectRatio`, `narrationEnabled`, and `autonomousDuration`. When no duration is supplied, the local director chooses 12–60 seconds from the category and story. Read progress from `GET /api/video-jobs/:id` or the SSE endpoint `GET /api/video-jobs/:id/events`. Revision, approval, cancellation, and retry endpoints live under `/api/video-jobs/:id/*`; the generic job feedback and approval routes also dispatch video jobs correctly.
 
-The isolated Python worker generates short people/story motion with FramePack, doubles temporal resolution with RIFE, upscales generated scenes with Real-ESRGAN, and intercuts those scenes with product-identity-safe hero shots. ACE-Step creates an original 120 BPM score; cuts are quantized to its half-second beat grid. Optional narration uses Kokoro. The final MP4 is checked with ffprobe and loudness analysis for exact duration, dimensions, audio presence, and audibility. Approval creates a 1080×1920 master, Instagram/Facebook reels, square and portrait variants, and a poster. Job metadata survives API restarts in SQLite.
+The isolated Python worker uses LTX-Video 2B 0.9.6 distilled as its primary motion engine at 576×1024 and the checkpoint's recommended 8 steps. Qwen chooses 33–121 frames, 16–30 FPS and two or three candidate takes independently for each generative shot. It also chooses 5–12 shots, product staging, camera direction, edit motion and transitions. Background removal lets rigid products move through designed environments without repeatedly showing the source photograph. FramePack remains an optional fallback. Real-ESRGAN can enhance accepted generated scenes, while ACE-Step creates an original category-specific score aligned to edit points; optional narration uses Kokoro.
 
-A real uploaded product image is mandatory. In worker mode, PEOPLE shots also require the configured scene-image provider to create diverse cinematic source frames before FramePack animates them. The job fails clearly when either prerequisite is unavailable; it does not silently publish a placeholder slideshow.
+Every director plan is upgraded to editable timeline schema v2. The worker returns the accepted per-shot footage and its candidate-selection evidence, then Remotion assembles reusable product-reveal, macro-inspection, feature-callout, hero and brand-finale compositions. FFmpeg remains responsible for model preparation, the synchronized audio bed, technical encoding and delivery variants. The preview pass renders at 540×960. Approval reruns the accepted timeline at 1080×1920 before producing Instagram/Facebook reels, square and portrait variants, and a poster.
 
-Inspect local model and executable readiness with `GET /api/video-worker/health`. Run a full offline render/approval/export check with `npm run smoke:video`; set `SMOKE_VIDEO_DURATION=30` for the default-film validation or `60` for the supported one-minute maximum.
+Every real product image also has a guaranteed local video path. If both LTX and FramePack are unavailable or reject a shot, the worker converts that shot's product-matched keyframe into a controlled camera, crop, exposure and light animation. RIFE and Real-ESRGAN failures retain the accepted source clip, and the built-in original score follows the planned BPM and musical key when ACE-Step is unavailable. These fallbacks remain represented in motion QA and the editable timeline rather than aborting the complete product film.
+
+`VIDEO_FAST_TEMPLATE_MODE=true` is the default delivery mode. It bypasses Qwen direction, LTX, FramePack, RIFE, Real-ESRGAN, ACE-Step, Qwen Vision and Remotion. A six-shot, 15-second template uses the real product image in reusable macro, lateral, diagonal, locked-light, pull-back and precision-track treatments, then FFmpeg adds transitions, product copy, sound design and a beat/key-matched original score. Explicit durations are still honored. Set the flag to `false` to restore the slower generative pipeline.
+
+After the preview render, representative frames from every shot are extracted at the entrance, midpoint and exit. Qwen3-VL evaluates product presence, identity, empty space, crop, typography, continuity, lighting and slideshow-like editing. Deterministic checks catch black frames and nearly frozen shots even when the vision model is unavailable. High-severity findings map to bounded, issue-specific repairs; only affected keyframes are rebuilt and unchanged LTX clips are reused through their content cache. The job saves the editable timeline, accepted and rejected motion candidates, visual-review reports and repair history as production artifacts.
+
+A real uploaded product image is mandatory. Generative shots are animated from the planned product motion plates with LTX and automatically scored for identity, motion and sharpness. The job fails clearly when the required source is unavailable; it does not silently publish a placeholder slideshow.
+
+Set `VIDEO_EDITOR_ENGINE=remotion` to use the editable editor layer, `VIDEO_VISUAL_QA=true` to enable Qwen visual review, `OLLAMA_VISION_MODEL=qwen3-vl:2b` to select the local evaluator, and `MAX_VIDEO_VISUAL_REPAIRS=2` to bound automatic revisions. If Remotion or Qwen Vision is temporarily unavailable, the pipeline records the reason and retains the existing FFmpeg render and deterministic inspection path.
+
+Inspect local model and executable readiness with `GET /api/video-worker/health`. Run a full offline render/approval/export check with `npm run smoke:video`; omit `SMOKE_VIDEO_DURATION` to let Qwen direct the runtime, or set it to any supported 8–60 second value.
 
 The Adobe add-on remains available with:
 

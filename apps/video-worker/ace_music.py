@@ -13,7 +13,7 @@ import numpy as np
 import soundfile as sf
 
 
-def score_candidate(path: Path) -> dict:
+def score_candidate(path: Path, cut_times: list[float]) -> dict:
     audio, sample_rate = sf.read(path, always_2d=True, dtype="float32")
     mono = audio.mean(axis=1)
     window = max(1, int(sample_rate * 0.25))
@@ -27,14 +27,34 @@ def score_candidate(path: Path) -> dict:
     resolve = float(np.mean(rms[max(0, int(count * .88)):]))
     dynamic = float(np.percentile(rms, 90) - np.percentile(rms, 10))
     peak = float(np.max(np.abs(mono)))
+    onset_window = max(1, int(sample_rate * 0.05))
+    onset_usable = mono[: (len(mono) // onset_window) * onset_window]
+    onset_rms = np.sqrt(np.mean(onset_usable.reshape(-1, onset_window) ** 2, axis=1) + 1e-9)
+    novelty = np.maximum(0.0, np.diff(onset_rms, prepend=onset_rms[0]))
+    threshold = float(np.percentile(novelty, 72)) if len(novelty) else 0.0
+    minimum_gap = max(1, int(0.25 / 0.05))
+    peaks = []
+    for position in range(1, max(1, len(novelty) - 1)):
+        if novelty[position] < threshold or novelty[position] < novelty[position - 1] or novelty[position] < novelty[position + 1]:
+            continue
+        if not peaks or position - peaks[-1] >= minimum_gap:
+            peaks.append(position)
+        elif novelty[position] > novelty[peaks[-1]]:
+            peaks[-1] = position
+    onset_times = [position * 0.05 for position in peaks]
+    if cut_times and onset_times:
+        distances = [min(abs(cut - onset) for onset in onset_times) for cut in cut_times]
+        cut_alignment = float(np.mean(np.exp(-np.asarray(distances) / 0.18)))
+    else:
+        cut_alignment = 0.0
     # Prefer a restrained opening, an audible hero lift, a cleaner resolve and
     # useful dynamics. Penalize silence and clipping.
-    score = (hero - intro) * 8 + (hero - resolve) * 5 + dynamic * 4
+    score = (hero - intro) * 8 + (hero - resolve) * 5 + dynamic * 4 + cut_alignment * 2.0
     if float(np.mean(rms)) < .01:
         score -= 2
     if peak > .995:
         score -= 1
-    return {"score": round(score, 6), "intro": intro, "hero": hero, "resolve": resolve, "dynamic": dynamic, "peak": peak}
+    return {"score": round(score, 6), "intro": intro, "hero": hero, "resolve": resolve, "dynamic": dynamic, "peak": peak, "cutAlignment": round(cut_alignment, 6), "onsetTimes": [round(value, 3) for value in onset_times[:40]]}
 
 
 def main() -> int:
@@ -49,7 +69,9 @@ def main() -> int:
     parser.add_argument("--keyscale", default="D minor")
     parser.add_argument("--timesignature", default="4/4")
     parser.add_argument("--candidates", type=int, default=2)
+    parser.add_argument("--cut-times", default="")
     args = parser.parse_args()
+    cut_times = [float(value) for value in args.cut_times.split(",") if value.strip()]
 
     root = Path(os.environ.get("ACESTEP_ROOT", r"D:\AI-Models\ACE-Step"))
     sys.path.insert(0, str(root))
@@ -102,7 +124,7 @@ def main() -> int:
         if not result.success or not result.audios:
             continue
         generated = Path(result.audios[0]["path"])
-        metrics = score_candidate(generated)
+        metrics = score_candidate(generated, cut_times)
         candidates.append({"path": generated, "seed": seed, "metrics": metrics})
     if not candidates:
         raise RuntimeError("ACE-Step produced no usable audio candidate.")

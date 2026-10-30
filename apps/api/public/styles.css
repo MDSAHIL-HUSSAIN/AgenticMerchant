@@ -131,6 +131,14 @@ form { margin-top: 30px; }
 .activity-log li { display: grid; grid-template-columns: 110px 1fr; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
 .activity-log time { font: 700 10px monospace; color: var(--violet); }
 .activity-log span { color: #56544e; }
+.activity-log .activity-success span { color: #216e45; }
+.activity-log .activity-failed span, .activity-log .activity-error span { color: #b42318; }
+.activity-log .activity-warning span { color: #946200; }
+.activity-log .activity-running span, .activity-log .activity-started span { color: #315ea8; }
+.activity-log .activity-skipped span { color: #77746c; }
+.activity-log details { margin-top: 7px; color: #56544e; }
+.activity-log summary { width: max-content; cursor: pointer; font: 700 10px monospace; text-transform: uppercase; letter-spacing: .08em; }
+.activity-log pre { max-width: 100%; margin: 8px 0 0; padding: 10px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: #f7f5ef; color: #34322e; font: 10px/1.5 monospace; white-space: pre-wrap; word-break: break-word; }
 .loading-screen { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; background: rgba(16,16,16,.94); backdrop-filter: blur(22px); }
 .loading-screen[hidden] { display: none; }
 .loader-mark { display: flex; align-items: end; gap: 6px; height: 64px; margin-bottom: 32px; }

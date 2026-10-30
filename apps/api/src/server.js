@@ -19,6 +19,7 @@ import { applyVideoFeedback } from "./video-revisions.js";
 import { cancelVideoJob, createVideoJob, recoverVideoJobs, retryVideoJob, videoEvents } from "./video-orchestrator.js";
 import { getVideoWorkerHealth } from "./video-worker-client.js";
 import { processWhatsAppFeedback, processWhatsAppMessage } from "./whatsapp-integration.js";
+import { activityTrace, finishActivity, publishActivity } from "./activity-stream.js";
 
 const app = express();
 const imageCache = new Map();
@@ -132,10 +133,11 @@ app.post("/api/product-drafts/:id/submit", (request, response) => {
 });
 
 app.post("/api/product-drafts/:id/design", async (request, response) => {
+  const traceId = String(request.headers["x-activity-trace"] || "").slice(0, 120);
   try {
     const input = draftToDesignInput(request.params.id);
     const job = registerJob(
-      await createDesignJob(input.brief, { productAssetIds: input.productAssetIds, referenceAssetIds: input.referenceAssetIds }),
+      await createDesignJob(input.brief, { productAssetIds: input.productAssetIds, referenceAssetIds: input.referenceAssetIds, onActivity: entry => publishActivity(traceId, entry) }),
       {
         merchantId: input.draft.merchantId,
         conversationId: input.draft.conversationId,
@@ -147,7 +149,21 @@ app.post("/api/product-drafts/:id/design", async (request, response) => {
   } catch (error) {
     console.error(error);
     response.status(400).json({ error: error.message || "Unable to generate designs from this product draft." });
+  } finally {
+    finishActivity(traceId);
   }
+});
+
+app.get("/api/activity/:traceId/events", (request, response) => {
+  const traceId = String(request.params.traceId || "").slice(0, 120);
+  response.set({ "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+  response.flushHeaders();
+  const { history, emitter } = activityTrace(traceId);
+  for (const entry of history) response.write(`event: activity\ndata: ${JSON.stringify(entry)}\n\n`);
+  const listener = entry => response.write(`event: activity\ndata: ${JSON.stringify(entry)}\n\n`);
+  const heartbeat = setInterval(() => response.write(": keep-alive\n\n"), 15_000);
+  emitter.on(traceId, listener);
+  request.on("close", () => { clearInterval(heartbeat); emitter.off(traceId, listener); });
 });
 
 app.post("/api/product-drafts/:id/video", async (request, response) => {

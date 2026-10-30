@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "install:all": "npm --prefix apps/api install && npm --prefix apps/design-agent-adobe install && npm --prefix apps/whatsapp-bot install",
+    "install:all": "npm --prefix apps/api install && npm --prefix apps/remotion-video-editor install && npm --prefix apps/design-agent-adobe install && npm --prefix apps/whatsapp-bot install",
     "demo": "npm --prefix apps/api start",
     "dev:api": "npm --prefix apps/api run dev",
     "test": "npm --prefix apps/api test && npm --prefix apps/design-agent-adobe run build && npm --prefix apps/whatsapp-bot run build",

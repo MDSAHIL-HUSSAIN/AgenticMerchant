@@ -1,5 +1,5 @@
 const $ = selector => document.querySelector(selector);
-const state = { draft: null, job: null, selected: new Set(), busyTimer: null, outputType: "image" };
+const state = { draft: null, job: null, selected: new Set(), seenLogs: new Set(), busyTimer: null, outputType: "image" };
 
 const elements = {
   form: $("#brief-form"), modePill: $("#mode-pill"), empty: $("#empty-state"), grid: $("#design-grid"),
@@ -15,11 +15,30 @@ const elements = {
 function splitList(value) { return String(value || "").split(/\n|,/).map(item => item.trim()).filter(Boolean); }
 function assetUrl(assetId) { return `/api/assets/${encodeURIComponent(assetId)}/content`; }
 function stamp() { return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
-function addActivity(message) {
+function addActivity(message, options = {}) {
   const li = document.createElement("li");
-  li.innerHTML = `<time>${stamp()}</time><span></span>`;
+  li.className = `activity-${String(options.status || "info").toLowerCase()}`;
+  li.innerHTML = `<time>${options.at ? new Date(options.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : stamp()}</time><span></span>`;
   li.querySelector("span").textContent = message;
+  if (options.details && Object.keys(options.details).length) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "Details";
+    const pre = document.createElement("pre");
+    pre.textContent = JSON.stringify(options.details, null, 2);
+    details.append(summary, pre);
+    li.querySelector("span").append(details);
+  }
   elements.activity.prepend(li);
+}
+
+function syncActivityLogs(job = state.job) {
+  for (const entry of job?.activityLogs || []) {
+    if (!entry?.id || state.seenLogs.has(entry.id)) continue;
+    state.seenLogs.add(entry.id);
+    const label = `[${entry.status}] ${String(entry.channel || "pipeline").toUpperCase()} · ${String(entry.stage || "WORKFLOW").replaceAll("_", " ")}`;
+    addActivity(`${label} — ${entry.message}`, { status: entry.status, at: entry.at, details: entry.details });
+  }
 }
 function toast(message, error = false) {
   elements.toast.textContent = message;
@@ -82,6 +101,7 @@ async function createDraft(event) {
     return;
   }
   state.selected.clear();
+  state.seenLogs.clear();
   elements.exports.hidden = true;
   busy("Reading the product brief…");
   addActivity("Received a new product brief from the temporary demo interface.");
@@ -132,7 +152,26 @@ function showClarification() {
 
 async function generateDesigns() {
   elements.loadingTitle.textContent = "Choosing the strongest art direction…";
-  state.job = await api(`/api/product-drafts/${state.draft.id}/design`, { method: "POST" });
+  const traceId = globalThis.crypto?.randomUUID?.() || `trace-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const stream = new EventSource(`/api/activity/${encodeURIComponent(traceId)}/events`);
+  stream.addEventListener("activity", event => {
+    try {
+      const entry = JSON.parse(event.data);
+      if (entry.id && !state.seenLogs.has(entry.id)) {
+        state.seenLogs.add(entry.id);
+        const label = `[${entry.status}] ${String(entry.channel || "image").toUpperCase()} · ${String(entry.stage || "WORKFLOW").replaceAll("_", " ")}`;
+        addActivity(`${label} — ${entry.message}`, { status: entry.status, at: entry.at, details: entry.details });
+        elements.loadingTitle.textContent = entry.message;
+        elements.loadingDetail.textContent = `${String(entry.stage || "IMAGE").replaceAll("_", " ")} · live generation log`;
+      }
+    } catch { /* Ignore malformed activity frames and keep the render running. */ }
+  });
+  try {
+    state.job = await api(`/api/product-drafts/${state.draft.id}/design`, { method: "POST", headers: { "x-activity-trace": traceId } });
+  } finally {
+    stream.close();
+  }
+  syncActivityLogs();
   idle();
   addActivity(`Rendered the final autonomous design. Quality status: ${state.job.qa?.passed ? "passed" : "review recommended"}.`);
   if (state.job.warnings?.length) state.job.warnings.forEach(warning => addActivity(`Note: ${warning}`));
@@ -145,28 +184,28 @@ async function generateCreative() {
   elements.loadingTitle.textContent = "Directing the product film…";
   state.job = await api(`/api/product-drafts/${state.draft.id}/video`, {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ durationSeconds: 30, aspectRatio: "9:16", fps: 30 })
+    body: JSON.stringify({ aspectRatio: "9:16", fps: 30, autonomousDuration: true })
   });
+  syncActivityLogs();
   addActivity(`Video job ${state.job.id.slice(-8)} entered the local GPU queue.`);
   let lastStage = state.job.progress?.stage || "";
   elements.loadingDetail.textContent = "A 30-second local generative film may take 25–40 minutes on this GPU.";
   while (!["AWAITING_APPROVAL", "FAILED", "CANCELLED"].includes(state.job.status)) {
     await new Promise(resolve => setTimeout(resolve, 1000));
     state.job = await api(`/api/video-jobs/${state.job.id}`);
+    syncActivityLogs();
     if (state.job.progress?.message) {
       elements.loadingTitle.textContent = state.job.progress.message;
       const stage = String(state.job.progress.stage || "WORKING").replaceAll("_", " ");
       elements.loadingDetail.textContent = `${stage} · ${state.job.progress.percent || 0}% · Local GPU processing`;
-      if (state.job.progress.stage && state.job.progress.stage !== lastStage) {
-        addActivity(state.job.progress.message);
-        lastStage = state.job.progress.stage;
-      }
+      if (state.job.progress.stage) lastStage = state.job.progress.stage;
     }
   }
   if (state.job.status !== "AWAITING_APPROVAL") throw new Error(state.job.error || `Video generation ${state.job.status.toLowerCase()}.`);
   idle();
   state.selected = new Set(["video_master"]);
-  addActivity(`The ${state.job.videoSpec.durationSeconds}-second film passed temporal QA with score ${state.job.qa.score}.`);
+  addActivity(`The ${state.job.videoSpec.durationSeconds}-second editable film passed visual and temporal QA with score ${state.job.qa.score}.`);
+  addActivity(`${state.job.editor?.engine === "remotion" ? "Remotion" : "FFmpeg"} assembled the picture edit; ${state.job.qa?.visual?.evaluator || "deterministic review"} inspected the result.`);
   renderJob();
   $("#workspace-title").scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -184,7 +223,9 @@ function renderJob() {
     const card = document.createElement("article");
     card.className = "design-card selected video-card";
     card.dataset.id = "video_master";
-    card.innerHTML = `<div class="design-image-wrap"><video src="${assetUrl(preview.assetId)}" controls playsinline preload="metadata"></video></div><div class="design-card-meta"><div><span>01 · AUTONOMOUS FILM</span><b>${escapeHtml(state.job.creativeTreatment.title)}</b></div><a class="zoom-button" href="${assetUrl(preview.assetId)}" download="product-film.mp4" aria-label="Download preview">↓</a></div>`;
+    const timeline = state.job.previewAssets.find(item => item.kind === "VIDEO_EDITABLE_TIMELINE");
+    const editor = state.job.editor?.engine === "remotion" ? "EDITABLE REMOTION FILM" : "AUTONOMOUS FILM";
+    card.innerHTML = `<div class="design-image-wrap"><video src="${assetUrl(preview.assetId)}" controls playsinline preload="metadata"></video></div><div class="design-card-meta"><div><span>01 · ${editor}</span><b>${escapeHtml(state.job.creativeTreatment.title)}</b></div><div>${timeline ? `<a class="zoom-button" href="${assetUrl(timeline.assetId)}" download="editable-timeline.json" aria-label="Download editable timeline">{ }</a>` : ""}<a class="zoom-button" href="${assetUrl(preview.assetId)}" download="product-film.mp4" aria-label="Download preview">↓</a></div></div>`;
     elements.grid.append(card);
     updateSelection();
     return;
@@ -253,10 +294,26 @@ async function approve() {
   if (!state.selected.size) return toast("Select at least one design.", true);
   busy("Exporting approved artwork…", "Creating Shopify, Instagram and Facebook files from the selected design(s).");
   try {
-    state.job = await api(`/api/jobs/${state.job.id}/approve`, {
+    let finished = false;
+    const approval = api(`/api/jobs/${state.job.id}/approve`, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ designIds: [...state.selected], idempotencyKey: `demo-approve-${Date.now()}` })
     });
+    const monitor = setInterval(async () => {
+      if (finished) return;
+      try {
+        const snapshot = await api(`/api/jobs/${state.job.id}`);
+        syncActivityLogs(snapshot);
+        if (snapshot.status) elements.loadingDetail.textContent = `${String(snapshot.status).replaceAll("_", " ")} · watching detailed render and publishing logs`;
+      } catch { /* The approval response remains the source of truth. */ }
+    }, 750);
+    try {
+      state.job = await approval;
+    } finally {
+      finished = true;
+      clearInterval(monitor);
+    }
+    syncActivityLogs();
     idle();
     addActivity(`Approved ${state.job.approvedDesignIds.length} design(s) and generated ${state.job.finalAssets.length} final files.`);
     const publishing = [...(state.job.handoffs || [])].reverse().find(item => item.type === "PUBLISHING");
@@ -264,7 +321,15 @@ async function approve() {
     renderExports();
     toast("Approved files are ready to inspect and download.");
     elements.exports.scrollIntoView({ behavior: "smooth", block: "start" });
-  } catch (error) { idle(); toast(error.message, true); addActivity(`Export failed: ${error.message}`); }
+  } catch (error) {
+    try {
+      const snapshot = await api(`/api/jobs/${state.job.id}`);
+      syncActivityLogs(snapshot);
+    } catch { /* Preserve the original export or publishing failure. */ }
+    idle();
+    toast(error.message, true);
+    addActivity(`Export or publishing failed: ${error.message}`, { status: "FAILED" });
+  }
 }
 
 function renderExports() {
