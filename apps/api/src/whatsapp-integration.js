@@ -36,12 +36,30 @@ export async function processWhatsAppMessage({ metadata = {}, text = "", files =
 
   let draft;
   if (metadata.productDraftId && metadata.questionId) {
-    draft = answerClarification(metadata.productDraftId, {
-      questionId: metadata.questionId,
-      answer: text,
-      facts: metadata.facts,
-      assetRoles: metadata.assetRoles
-    });
+    try {
+      draft = answerClarification(metadata.productDraftId, {
+        questionId: metadata.questionId,
+        answer: text,
+        facts: metadata.facts,
+        assetRoles: metadata.assetRoles
+      });
+    } catch (error) {
+      if (error.message !== "Product draft not found.") throw error;
+      // Render's local Agentic state can be replaced during deployment while
+      // the WhatsApp database still remembers the previous clarification.
+      // Rebuild the draft from the retried message and media instead of
+      // permanently retrying a draft ID that can no longer exist.
+      const freshMetadata = { ...metadata };
+      delete freshMetadata.productDraftId;
+      delete freshMetadata.questionId;
+      console.warn(JSON.stringify({
+        event: "whatsapp.draft.recovered",
+        messageId,
+        expiredDraftId: metadata.productDraftId,
+        fileCount: files.length
+      }));
+      draft = await addDraftMessage({ metadata: freshMetadata, text, files });
+    }
   } else {
     draft = await addDraftMessage({ metadata, text, files });
   }
