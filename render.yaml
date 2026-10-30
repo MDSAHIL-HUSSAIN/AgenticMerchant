@@ -23,5 +23,7 @@ services:
         value: /tmp/agentic-data/agentic-state.sqlite
       - key: WHATSAPP_HANDOFF_URL
         value: https://whatsapp-bot-1lmp.onrender.com/whatsapp/integrations/agentic/previews
+      - key: DASHBOARD_HANDOFF_URL
+        sync: false
       - key: INTERNAL_SERVICE_TOKEN
         sync: false

@@ -7,6 +7,18 @@ import { loadDrafts, persistDraft } from "./state-db.js";
 
 const drafts = new Map(loadDrafts().map(draft => [draft.id, draft]));
 const clean = value => String(value || "").trim();
+const supportedChannels = new Set(["instagram", "facebook"]);
+
+function normalizeTargetChannels(value, fallback = ["instagram", "facebook"]) {
+  if (value === undefined || value === null || value === "") return [...fallback];
+  let parsed = value;
+  if (typeof value === "string") {
+    try { parsed = JSON.parse(value); }
+    catch { parsed = value.split(","); }
+  }
+  if (!Array.isArray(parsed)) return [...fallback];
+  return [...new Set(parsed.map(item => clean(item).toLowerCase()).filter(item => supportedChannels.has(item)))];
+}
 
 function parseObject(value, fallback = {}) {
   if (!value) return fallback;
@@ -24,6 +36,8 @@ function publicDraft(draft) {
     id: draft.id,
     merchantId: draft.merchantId,
     conversationId: draft.conversationId,
+    sourceChannel: draft.sourceChannel || "whatsapp",
+    targetChannels: [...(draft.targetChannels || ["instagram", "facebook"])],
     productId: draft.productId,
     status: draft.status,
     facts: { ...draft.facts },
@@ -61,6 +75,8 @@ export async function addDraftMessage({ metadata: rawMetadata, text, files = [] 
     id,
     merchantId,
     conversationId,
+    sourceChannel: clean(metadata.sourceChannel).toLowerCase() || (conversationId.startsWith("dashboard:") ? "dashboard" : "whatsapp"),
+    targetChannels: normalizeTargetChannels(metadata.targetChannels),
     productId: clean(metadata.productId),
     status: "COLLECTING_INPUT",
     messages: [],
@@ -70,6 +86,7 @@ export async function addDraftMessage({ metadata: rawMetadata, text, files = [] 
     createdAt: now,
     updatedAt: now
   };
+  if (metadata.targetChannels !== undefined) draft.targetChannels = normalizeTargetChannels(metadata.targetChannels, draft.targetChannels);
   const mediaRoles = parseObject(metadata.mediaRoles);
   const transcripts = parseObject(metadata.audioTranscripts);
   let visualAnalysis = null;

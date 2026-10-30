@@ -54,6 +54,10 @@ export function registerJob(rawJob, context = {}) {
     type: rawJob.type || "IMAGE_POST",
     merchantId: context.merchantId || rawJob.merchantId || "",
     conversationId: context.conversationId || rawJob.conversationId || "",
+    sourceChannel: context.sourceChannel || rawJob.sourceChannel || "whatsapp",
+    targetChannels: Array.isArray(context.targetChannels)
+      ? [...new Set(context.targetChannels.map(item => String(item).toLowerCase()).filter(item => ["instagram", "facebook"].includes(item)))]
+      : (Array.isArray(rawJob.targetChannels) ? rawJob.targetChannels : ["instagram", "facebook"]),
     productId: context.productId || rawJob.productId || "",
     productDraftId: context.productDraftId || rawJob.productDraftId || "",
     status: rawJob.status || "AWAITING_APPROVAL",

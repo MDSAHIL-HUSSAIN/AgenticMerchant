@@ -10,7 +10,7 @@ import { approveDesigns } from "../src/approvals.js";
 import { attachAdobePage, claimAdobeJob, completeAdobeJob, createAdobeEditJob } from "../src/adobe-queue.js";
 import { deliverPreviewPack } from "../src/handoff.js";
 import { config } from "../src/config.js";
-import { processWhatsAppMessage } from "../src/whatsapp-integration.js";
+import { processWhatsAppFeedback, processWhatsAppMessage } from "../src/whatsapp-integration.js";
 import sharp from "sharp";
 
 async function makeJob() {
@@ -102,6 +102,76 @@ test("delivers preview images as multipart binary files rather than media URLs",
   };
   const result = await deliverPreviewPack(job);
   assert.equal(result.status, "DELIVERED");
+});
+
+test("routes dashboard previews only to the dashboard handoff", async t => {
+  const job = await makeJob();
+  job.sourceChannel = "dashboard";
+  job.targetChannels = ["instagram"];
+  const originalDashboardUrl = config.dashboardHandoffUrl;
+  const originalWhatsAppUrl = config.whatsappHandoffUrl;
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    config.dashboardHandoffUrl = originalDashboardUrl;
+    config.whatsappHandoffUrl = originalWhatsAppUrl;
+    globalThis.fetch = originalFetch;
+  });
+  config.dashboardHandoffUrl = "https://dashboard.internal.test/integrations/agentic/previews";
+  config.whatsappHandoffUrl = "https://whatsapp.internal.test/whatsapp/integrations/agentic/previews";
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, config.dashboardHandoffUrl);
+    const metadata = JSON.parse(options.body.get("metadata"));
+    assert.equal(metadata.sourceChannel, "dashboard");
+    assert.deepEqual(metadata.targetChannels, ["instagram"]);
+    return new Response(JSON.stringify({ success: true }), { status: 200 });
+  };
+  const result = await deliverPreviewPack(job);
+  assert.equal(result.status, "DELIVERED");
+  await assert.rejects(
+    () => processWhatsAppFeedback(job.id, { action: "APPROVE_ALL", messageId: `wrong-owner-${job.id}` }),
+    /belongs to the dashboard integration/i
+  );
+});
+
+test("an explicit empty target channel list exports without social publishing", async t => {
+  const job = await makeJob();
+  job.sourceChannel = "dashboard";
+  job.targetChannels = [];
+  const original = {
+    instagramUrl: config.instagramPublishUrl,
+    instagramKey: config.instagramPublishApiKey,
+    facebookCloud: config.facebookCloudinaryCloudName,
+    facebookKey: config.facebookCloudinaryApiKey,
+    facebookSecret: config.facebookCloudinaryApiSecret,
+    facebookUrl: config.facebookPublishUrl,
+    facebookPublishSecret: config.facebookPublishSecret,
+    genericUrl: config.publishingHandoffUrl
+  };
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    config.instagramPublishUrl = original.instagramUrl;
+    config.instagramPublishApiKey = original.instagramKey;
+    config.facebookCloudinaryCloudName = original.facebookCloud;
+    config.facebookCloudinaryApiKey = original.facebookKey;
+    config.facebookCloudinaryApiSecret = original.facebookSecret;
+    config.facebookPublishUrl = original.facebookUrl;
+    config.facebookPublishSecret = original.facebookPublishSecret;
+    config.publishingHandoffUrl = original.genericUrl;
+    globalThis.fetch = originalFetch;
+  });
+  config.instagramPublishUrl = "https://instagram.test/publish";
+  config.instagramPublishApiKey = "instagram-key";
+  config.facebookCloudinaryCloudName = "facebook-cloud";
+  config.facebookCloudinaryApiKey = "facebook-key";
+  config.facebookCloudinaryApiSecret = "facebook-secret";
+  config.facebookPublishUrl = "https://facebook.test/publish";
+  config.facebookPublishSecret = "facebook-publish-secret";
+  config.publishingHandoffUrl = "";
+  globalThis.fetch = async () => { throw new Error("No publisher should be called."); };
+  const approved = await approveDesigns(job.id, { designIds: ["design_1"], idempotencyKey: `no-publish-${job.id}` });
+  const publishing = approved.handoffs.find(item => item.type === "PUBLISHING");
+  assert.equal(publishing.status, "NOT_CONFIGURED");
+  assert.deepEqual(publishing.deliveries, []);
 });
 
 test("processes an idempotent WhatsApp image-design request and hands back one preview", async t => {

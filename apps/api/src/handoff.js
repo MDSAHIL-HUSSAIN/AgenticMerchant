@@ -27,6 +27,18 @@ function instagramConfigured() {
   return Boolean(config.instagramPublishUrl && config.instagramPublishApiKey);
 }
 
+function previewDestination(job) {
+  if ((job.sourceChannel || "whatsapp") === "dashboard") {
+    return { url: config.dashboardHandoffUrl, channel: "dashboard", label: "dashboard" };
+  }
+  return { url: config.whatsappHandoffUrl, channel: "whatsapp", label: "WhatsApp" };
+}
+
+function requestedChannels(job) {
+  if (!Array.isArray(job.targetChannels)) return new Set(["instagram", "facebook"]);
+  return new Set(job.targetChannels.map(item => String(item).toLowerCase()));
+}
+
 function cloudinarySignature(params) {
   const serialized = Object.entries(params)
     .sort(([left], [right]) => left.localeCompare(right))
@@ -191,6 +203,7 @@ async function postMultipart(url, metadata, assets, idempotencyKey, logContext =
 }
 
 export async function deliverPreviewPack(job) {
+  const destination = previewDestination(job);
   const assets = (job.previewAssets || []).map((asset, index) => ({ ...asset, filePart: `preview_${index + 1}` }));
   if (job.type === "VIDEO_POST") {
     const metadata = {
@@ -207,7 +220,7 @@ export async function deliverPreviewPack(job) {
       assets: assets.map((asset, index) => ({ assetId: asset.assetId, mimeType: asset.mimeType, kind: asset.kind, filePart: `preview_${index + 1}` })),
       actions: ["APPROVE_ALL", "EDIT_SELECTED", "REJECT_ALL"]
     };
-    return postMultipart(config.whatsappHandoffUrl, metadata, assets, `preview:${job.id}:${job.currentRevisionId}`, { job, channel: "whatsapp", purpose: "WhatsApp video preview delivery" });
+    return postMultipart(destination.url, metadata, assets, `preview:${job.id}:${job.currentRevisionId}`, { job, channel: destination.channel, purpose: `${destination.label} video preview delivery` });
   }
   const metadata = {
     event: "design.preview_ready",
@@ -217,6 +230,8 @@ export async function deliverPreviewPack(job) {
     designJobId: job.id,
     revisionId: job.currentRevisionId,
     revisionNumber: job.revisionNumber,
+    sourceChannel: job.sourceChannel || "whatsapp",
+    targetChannels: Array.isArray(job.targetChannels) ? job.targetChannels : ["instagram", "facebook"],
     designs: job.designs.map((design, index) => ({
       designId: design.id,
       concept: design.kind,
@@ -224,7 +239,7 @@ export async function deliverPreviewPack(job) {
     })),
     actions: ["APPROVE_ALL", "APPROVE_SELECTED", "EDIT_SELECTED", "REJECT_SELECTED", "REJECT_ALL", "EDIT_MANUALLY"]
   };
-  return postMultipart(config.whatsappHandoffUrl, metadata, assets, `preview:${job.id}:${job.currentRevisionId}`, { job, channel: "whatsapp", purpose: "WhatsApp image preview delivery" });
+  return postMultipart(destination.url, metadata, assets, `preview:${job.id}:${job.currentRevisionId}`, { job, channel: destination.channel, purpose: `${destination.label} image preview delivery` });
 }
 
 export async function deliverPublishingAssets(job) {
@@ -249,8 +264,9 @@ export async function deliverPublishingAssets(job) {
     }))
   };
   const attempts = [];
+  const targets = requestedChannels(job);
   activity(job, "publishing", "PUBLISHING", "STARTED", "Starting delivery to all configured social publishing destinations.", { jobType: job.type, assetCount: assets.length });
-  if (job.type !== "VIDEO_POST" && facebookConfigured()) {
+  if (targets.has("facebook") && job.type !== "VIDEO_POST" && facebookConfigured()) {
     attempts.push(
       deliverFacebookAsset(job).catch(error => {
         activity(job, "facebook", "PUBLISH", "FAILED", "Facebook publishing stopped with an error.", { error: error.message });
@@ -258,11 +274,13 @@ export async function deliverPublishingAssets(job) {
       })
     );
   } else {
-    activity(job, "facebook", "PUBLISH", "SKIPPED", job.type === "VIDEO_POST"
+    activity(job, "facebook", "PUBLISH", "SKIPPED", !targets.has("facebook")
+      ? "Facebook publishing was not requested for this job."
+      : job.type === "VIDEO_POST"
       ? "The current Facebook publisher is image-only, so the video export was not sent through that connector."
       : "Facebook publishing was skipped because its connection is not configured.");
   }
-  if (job.type !== "VIDEO_POST" && instagramConfigured()) {
+  if (targets.has("instagram") && job.type !== "VIDEO_POST" && instagramConfigured()) {
     attempts.push(
       deliverInstagramImage(job).catch(error => {
         activity(job, "instagram", "PUBLISH", "FAILED", "Instagram publishing stopped with an error.", { error: error.message });
@@ -270,26 +288,20 @@ export async function deliverPublishingAssets(job) {
       })
     );
   } else {
-    activity(job, "instagram", "PUBLISH", "SKIPPED", job.type === "VIDEO_POST"
+    activity(job, "instagram", "PUBLISH", "SKIPPED", !targets.has("instagram")
+      ? "Instagram publishing was not requested for this job."
+      : job.type === "VIDEO_POST"
       ? "The current Instagram connector is image-only, so the video export was not sent through that connector."
       : "Instagram publishing was skipped because its connection is not configured.");
   }
-  if (config.publishingHandoffUrl) {
+  if (targets.size && config.publishingHandoffUrl) {
     attempts.push(
       postMultipart(config.publishingHandoffUrl, metadata, assets, `publish:${job.id}:${job.currentRevisionId}`, { job, channel: "publisher", purpose: "generic publishing delivery" })
         .then(result => ({ channel: "generic", ...result }))
         .catch(error => ({ status: "FAILED", channel: "generic", deliveredAt: null, error: error.message }))
     );
   }
-  if (config.whatsappHandoffUrl) {
-    attempts.push(
-      postMultipart(config.whatsappHandoffUrl, metadata, assets, `whatsapp:publish:${job.id}:${job.currentRevisionId}`, { job, channel: "whatsapp", purpose: "WhatsApp final media delivery" })
-        .then(result => ({ channel: "whatsapp", ...result }))
-        .catch(error => ({ status: "FAILED", channel: "whatsapp", deliveredAt: null, error: error.message }))
-    );
-  } else {
-    activity(job, "whatsapp", "CONFIGURATION", "SKIPPED", "WhatsApp final delivery was skipped because its connection is not configured.");
-  }
+  activity(job, "whatsapp", "FINAL_DELIVERY", "SKIPPED", "WhatsApp receives review previews only; approved final assets are not sent again.");
   if (!attempts.length) {
     activity(job, "publishing", "PUBLISHING", "SKIPPED", "No social publishing destination is configured.");
     return { status: "NOT_CONFIGURED", deliveredAt: null, deliveries: [] };

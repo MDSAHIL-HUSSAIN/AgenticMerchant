@@ -199,6 +199,17 @@ POST /api/jobs/:jobId/feedback
 
 Supported actions are `APPROVE_ALL`, `APPROVE_SELECTED`, `EDIT_SELECTED`, `REJECT_SELECTED`, `REJECT_ALL`, and `EDIT_MANUALLY`. Every automatic edit or rejection creates a new immutable revision and reruns rendering and QA. Supply `messageId` or `idempotencyKey` to prevent duplicate processing.
 
+### Voice dashboard integration
+
+The dashboard uses separate, image-only integration routes while sharing the same draft, clarification, rendering, revision, approval and publishing engine:
+
+```text
+POST /api/integrations/dashboard/messages
+POST /api/integrations/dashboard/jobs/:id/feedback
+```
+
+Configure `DASHBOARD_HANDOFF_URL` with the dashboard's `/integrations/agentic/previews` URL. Jobs carry `sourceChannel` and are routed only to their originating service: dashboard previews never use `WHATSAPP_HANDOFF_URL`, and WhatsApp previews never use `DASHBOARD_HANDOFF_URL`. `targetChannels` may contain `instagram` and/or `facebook`; only those requested image publishers run on approval. An explicit empty list exports the approved image without social publishing.
+
 ## Final exports and publishing handoff
 
 Approval can also be called directly:

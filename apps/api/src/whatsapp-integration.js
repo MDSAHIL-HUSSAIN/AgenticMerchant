@@ -4,7 +4,7 @@ import { approveDesigns } from "./approvals.js";
 import { applyFeedbackRevision } from "./revisions.js";
 import { deliverPreviewPack } from "./handoff.js";
 import { getIntegrationResponse, persistIntegrationResponse } from "./state-db.js";
-import { publicJob, registerJob, saveJob } from "./job-store.js";
+import { getJob, publicJob, registerJob, saveJob } from "./job-store.js";
 
 const clean = value => String(value || "").trim();
 
@@ -27,10 +27,11 @@ async function deliverCurrentPreview(job) {
   return result;
 }
 
-export async function processWhatsAppMessage({ metadata = {}, text = "", files = [] }) {
+async function processIntegrationMessage(sourceChannel, { metadata = {}, text = "", files = [] }) {
+  metadata = { ...metadata, sourceChannel };
   const messageId = clean(metadata.messageId);
-  if (!messageId) throw new Error("messageId is required for WhatsApp idempotency.");
-  const key = `whatsapp:message:${messageId}`;
+  if (!messageId) throw new Error("messageId is required for integration idempotency.");
+  const key = `${sourceChannel}:message:${messageId}`;
   const previous = getIntegrationResponse(key);
   if (previous) return { ...previous, reused: true };
 
@@ -53,7 +54,7 @@ export async function processWhatsAppMessage({ metadata = {}, text = "", files =
       delete freshMetadata.productDraftId;
       delete freshMetadata.questionId;
       console.warn(JSON.stringify({
-        event: "whatsapp.draft.recovered",
+        event: `${sourceChannel}.draft.recovered`,
         messageId,
         expiredDraftId: metadata.productDraftId,
         fileCount: files.length
@@ -80,7 +81,9 @@ export async function processWhatsAppMessage({ metadata = {}, text = "", files =
       merchantId: input.draft.merchantId,
       conversationId: input.draft.conversationId,
       productId: input.draft.productId,
-      productDraftId: draft.id
+      productDraftId: draft.id,
+      sourceChannel: input.draft.sourceChannel,
+      targetChannels: input.draft.targetChannels
     }
   );
   const handoff = await deliverCurrentPreview(job);
@@ -89,10 +92,13 @@ export async function processWhatsAppMessage({ metadata = {}, text = "", files =
   return response;
 }
 
-export async function processWhatsAppFeedback(jobId, payload = {}, files = []) {
+async function processIntegrationFeedback(sourceChannel, jobId, payload = {}, files = []) {
+  const existingJob = getJob(jobId);
+  const ownerChannel = existingJob.sourceChannel || "whatsapp";
+  if (ownerChannel !== sourceChannel) throw new Error(`This design job belongs to the ${ownerChannel} integration.`);
   const messageId = clean(payload.messageId || payload.idempotencyKey);
-  if (!messageId) throw new Error("messageId is required for WhatsApp idempotency.");
-  const key = `whatsapp:feedback:${messageId}`;
+  if (!messageId) throw new Error("messageId is required for integration idempotency.");
+  const key = `${sourceChannel}:feedback:${messageId}`;
   const previous = getIntegrationResponse(key);
   if (previous) return { ...previous, reused: true };
   const action = clean(payload.action || "EDIT_SELECTED").toUpperCase();
@@ -112,3 +118,8 @@ export async function processWhatsAppFeedback(jobId, payload = {}, files = []) {
   persistIntegrationResponse(key, response);
   return response;
 }
+
+export const processWhatsAppMessage = input => processIntegrationMessage("whatsapp", input);
+export const processDashboardMessage = input => processIntegrationMessage("dashboard", input);
+export const processWhatsAppFeedback = (jobId, payload, files) => processIntegrationFeedback("whatsapp", jobId, payload, files);
+export const processDashboardFeedback = (jobId, payload, files) => processIntegrationFeedback("dashboard", jobId, payload, files);

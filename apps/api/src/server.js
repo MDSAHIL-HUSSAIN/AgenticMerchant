@@ -18,7 +18,7 @@ import { approveVideoJob } from "./video-approvals.js";
 import { applyVideoFeedback } from "./video-revisions.js";
 import { cancelVideoJob, createVideoJob, recoverVideoJobs, retryVideoJob, videoEvents } from "./video-orchestrator.js";
 import { getVideoWorkerHealth } from "./video-worker-client.js";
-import { processWhatsAppFeedback, processWhatsAppMessage } from "./whatsapp-integration.js";
+import { processDashboardFeedback, processDashboardMessage, processWhatsAppFeedback, processWhatsAppMessage } from "./whatsapp-integration.js";
 import { activityTrace, finishActivity, publishActivity } from "./activity-stream.js";
 
 const app = express();
@@ -105,6 +105,28 @@ app.post("/api/integrations/whatsapp/jobs/:id/feedback", requireInternalService,
   } catch (error) {
     console.error(error);
     response.status(400).json({ error: error.message || "Unable to process WhatsApp feedback." });
+  }
+});
+
+app.post("/api/integrations/dashboard/messages", requireInternalService, upload.any(), async (request, response) => {
+  try {
+    const metadata = { ...parseMultipartMetadata(request.body), sourceChannel: "dashboard" };
+    const result = await processDashboardMessage({ metadata, text: request.body.text || metadata.text, files: request.files || [] });
+    response.status(result.reused ? 200 : 201).json(result);
+  } catch (error) {
+    console.error(error);
+    response.status(400).json({ error: error.message || "Unable to process the dashboard product message." });
+  }
+});
+
+app.post("/api/integrations/dashboard/jobs/:id/feedback", requireInternalService, upload.any(), async (request, response) => {
+  try {
+    const payload = parseMultipartMetadata(request.body);
+    const result = await processDashboardFeedback(request.params.id, payload, request.files || []);
+    response.status(result.reused ? 200 : 201).json(result);
+  } catch (error) {
+    console.error(error);
+    response.status(400).json({ error: error.message || "Unable to process dashboard feedback." });
   }
 });
 

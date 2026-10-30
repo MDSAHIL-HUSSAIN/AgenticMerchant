@@ -34,6 +34,7 @@ export const config = {
   localWhisperModel: process.env.LOCAL_WHISPER_MODEL || "small",
   pythonCommand: process.env.PYTHON_COMMAND || "python",
   whatsappHandoffUrl: process.env.WHATSAPP_HANDOFF_URL || "",
+  dashboardHandoffUrl: process.env.DASHBOARD_HANDOFF_URL || "",
   publishingHandoffUrl: process.env.PUBLISHING_HANDOFF_URL || "",
   internalServiceToken: process.env.INTERNAL_SERVICE_TOKEN || "",
   facebookCloudinaryCloudName: process.env.FACEBOOK_CLOUDINARY_CLOUD_NAME || "",
