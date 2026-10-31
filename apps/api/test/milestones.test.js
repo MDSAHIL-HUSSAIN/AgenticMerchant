@@ -46,7 +46,7 @@ test("pauses an ambiguous image until its role is clarified", async () => {
   assert.equal(resolved.media[0].role, "PRIMARY_PRODUCT");
 });
 
-test("asks for product cost when Shopify is selected and never guesses a selling price", async () => {
+test("does not delay an image brief when Shopify cost is missing", async () => {
   const draft = await addDraftMessage({
     metadata: {
       merchantId: "merchant-test",
@@ -57,13 +57,10 @@ test("asks for product cost when Shopify is selected and never guesses a selling
     },
     files: [{ fieldname: "product_image", originalname: "bag.svg", mimetype: "image/svg+xml", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"/>') }]
   });
-  assert.equal(draft.status, "NEEDS_CLARIFICATION");
-  const question = draft.questions.find(item => item.field === "cost");
-  assert.ok(question);
-  const resolved = answerClarification(draft.id, { questionId: question.id, answer: "₹1200" });
-  assert.equal(resolved.status, "BRIEF_READY");
-  assert.equal(resolved.facts.cost, 1200);
-  assert.equal(resolved.facts.price, null);
+  assert.equal(draft.status, "BRIEF_READY");
+  assert.equal(draft.questions.some(item => item.field === "cost"), false);
+  assert.equal(draft.facts.cost, null);
+  assert.equal(draft.facts.price, null);
 });
 
 test("renders one autonomous preview and passes deterministic quality gates", async () => {

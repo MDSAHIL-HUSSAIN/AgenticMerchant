@@ -66,14 +66,6 @@ export function buildClarifications({ facts, media, targetChannels = [] }) {
   if (!facts.productName || facts.productName.length < 3) {
     questions.push({ id: crypto.randomUUID(), field: "productName", question: "What is the exact product name?", choices: [] });
   }
-  if (targetChannels.includes("shopify") && !(Number(facts.cost) > 0)) {
-    questions.push({
-      id: crypto.randomUUID(),
-      field: "cost",
-      question: "What is the product cost in INR? Shopify will calculate the selling price automatically from this cost.",
-      choices: []
-    });
-  }
   const uncertainImages = media.filter(item => item.mediaType === "image" && item.role === "UNCERTAIN");
   if (uncertainImages.length) {
     questions.push({

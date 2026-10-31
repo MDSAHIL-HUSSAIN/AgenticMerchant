@@ -49,6 +49,16 @@ function requestedChannels(job) {
   return new Set(job.targetChannels.map(item => String(item).toLowerCase()));
 }
 
+function placeholderShopifyCost(job) {
+  const source = String(job.productId || job.id || "shopify-product");
+  let hash = 2166136261;
+  for (const character of source) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return 100 + (Math.abs(hash) % 900);
+}
+
 function cloudinarySignature(params, apiSecret = config.facebookCloudinaryApiSecret) {
   const serialized = Object.entries(params)
     .sort(([left], [right]) => left.localeCompare(right))
@@ -216,10 +226,10 @@ export async function deliverShopifyImage(job) {
     activity(job, "shopify", "CONFIGURATION", "SKIPPED", "Shopify publishing was skipped because its connection is not configured.");
     return { status: "NOT_CONFIGURED", deliveredAt: null, channel: "shopify" };
   }
-  const cost = Number(job.commerce?.cost);
-  if (!(cost > 0)) {
-    activity(job, "shopify", "PRODUCT_DATA", "FAILED", "Shopify publishing requires a valid product cost so StoreBot can calculate the selling price.");
-    throw new Error("Shopify publishing requires a valid product cost greater than zero.");
+  const suppliedCost = Number(job.commerce?.cost);
+  const cost = suppliedCost > 0 ? suppliedCost : placeholderShopifyCost(job);
+  if (!(suppliedCost > 0)) {
+    activity(job, "shopify", "PRODUCT_DATA", "INFO", "No product cost was supplied; using a stable placeholder cost for the Shopify draft.", { placeholderCost: cost });
   }
   const asset = (job.finalAssets || []).find(item => item.platform === "shopify");
   if (!asset) {
@@ -387,7 +397,7 @@ export async function deliverPublishingAssets(job) {
       ? "The current Instagram connector is image-only, so the video export was not sent through that connector."
       : "Instagram publishing was skipped because its connection is not configured.");
   }
-  if (targets.has("shopify") && job.type !== "VIDEO_POST" && shopifyConfigured()) {
+  if (job.type !== "VIDEO_POST" && shopifyConfigured()) {
     attempts.push(
       deliverShopifyImage(job).catch(error => {
         activity(job, "shopify", "PUBLISH", "FAILED", "Shopify publishing stopped with an error.", { error: error.message });
@@ -395,9 +405,7 @@ export async function deliverPublishingAssets(job) {
       })
     );
   } else {
-    activity(job, "shopify", "PUBLISH", "SKIPPED", !targets.has("shopify")
-      ? "Shopify publishing was not requested for this job."
-      : job.type === "VIDEO_POST"
+    activity(job, "shopify", "PUBLISH", "SKIPPED", job.type === "VIDEO_POST"
       ? "The Shopify connector accepts image products only, so video was not sent."
       : "Shopify publishing was skipped because its connection is not configured.");
   }

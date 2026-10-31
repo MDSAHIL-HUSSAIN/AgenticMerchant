@@ -232,7 +232,7 @@ POST /api/integrations/dashboard/messages
 POST /api/integrations/dashboard/jobs/:id/feedback
 ```
 
-Configure `DASHBOARD_HANDOFF_URL` with the dashboard's `/integrations/agentic/previews` URL. Jobs carry `sourceChannel` and are routed only to their originating service: dashboard previews never use `WHATSAPP_HANDOFF_URL`, and WhatsApp previews never use `DASHBOARD_HANDOFF_URL`. Image `targetChannels` may contain `instagram`, `facebook`, and/or `shopify`; only those requested publishers run on approval. An explicit empty list exports the approved image without publishing. Gemini video targets remain limited to Instagram and Facebook.
+Configure `DASHBOARD_HANDOFF_URL` with the dashboard's `/integrations/agentic/previews` URL. Jobs carry `sourceChannel` and are routed only to their originating service: dashboard previews never use `WHATSAPP_HANDOFF_URL`, and WhatsApp previews never use `DASHBOARD_HANDOFF_URL`. Image `targetChannels` controls Instagram and Facebook. Shopify draft creation is automatic for every approved image when its connection is configured, even when the social channel list is empty. Gemini video targets remain limited to Instagram and Facebook.
 
 The same dashboard also supports the independent Gemini web-video job endpoints under `/api/gemini-video/jobs`. It accepts `video.preview_ready` callbacks, renders the public 9:16 MP4 for review, and offers approve/publish, regenerate and reject actions. Video approval requires an explicit `confirm: true` and immediately attempts the configured Meta Reel publishers.
 
@@ -268,7 +268,7 @@ For the teammate's Instagram image publisher, configure `INSTAGRAM_PUBLISH_URL` 
 
 ### StoreBot Shopify integration
 
-Configure `SHOPIFY_CLOUDINARY_CLOUD_NAME`, `SHOPIFY_CLOUDINARY_API_KEY`, `SHOPIFY_CLOUDINARY_API_SECRET`, `SHOPIFY_PUBLISH_URL`, and `SHOPIFY_PUBLISH_SECRET` with the same Cloudinary account and webhook secret used by StoreBot Shopify. After explicit approval, Agentic uploads only the approved `shopify` 1600×1600 PNG and sends its Cloudinary public ID plus product cost to StoreBot. Agentic never supplies a selling price; StoreBot calculates it and creates the Shopify product as `DRAFT`. Dashboard inventory provides its saved cost automatically. WhatsApp and general dashboard briefs ask for product cost when Shopify is selected and cost is missing.
+Configure `SHOPIFY_CLOUDINARY_CLOUD_NAME`, `SHOPIFY_CLOUDINARY_API_KEY`, `SHOPIFY_CLOUDINARY_API_SECRET`, `SHOPIFY_PUBLISH_URL`, and `SHOPIFY_PUBLISH_SECRET` with the same Cloudinary account and webhook secret used by StoreBot Shopify. After explicit approval of any image, Agentic uploads only the approved `shopify` 1600×1600 PNG and sends its Cloudinary public ID plus product cost to StoreBot. Agentic never supplies a selling price; StoreBot calculates it and creates the Shopify product as `DRAFT`. Dashboard inventory provides its saved cost automatically. If no cost is available, Agentic supplies a stable placeholder cost so approval never waits for cost input.
 
 ## Optional Adobe manual editing
 

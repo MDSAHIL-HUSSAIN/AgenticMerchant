@@ -328,10 +328,10 @@ test("sends only the approved portrait image to the Instagram publisher", async 
   assert.equal(delivery.deliveries[0].instagramPostId, "ig-post-789");
 });
 
-test("uploads the Shopify export and lets StoreBot calculate the selling price", async t => {
+test("automatically publishes Shopify with a placeholder cost when no cost or Shopify target was supplied", async t => {
   const job = await makeJob();
-  job.targetChannels = ["shopify"];
-  job.commerce = { cost: 800, sku: "KURTI-001", vendor: "Kavya Boutique", productType: "Apparel" };
+  job.targetChannels = [];
+  job.commerce = { sku: "KURTI-001", vendor: "Kavya Boutique", productType: "Apparel" };
   const original = {
     cloudName: config.shopifyCloudinaryCloudName,
     apiKey: config.shopifyCloudinaryApiKey,
@@ -373,7 +373,7 @@ test("uploads the Shopify export and lets StoreBot calculate the selling price",
     assert.equal(options.headers["idempotency-key"], `shopify:${job.id}:${job.currentRevisionId}`);
     const body = JSON.parse(options.body);
     assert.equal(body.approved, true);
-    assert.equal(body.dashboard.product.cost, 800);
+    assert.ok(body.dashboard.product.cost >= 100 && body.dashboard.product.cost <= 999);
     assert.equal(body.dashboard.product.sku, "KURTI-001");
     assert.equal(body.dashboard.product.price, undefined);
     assert.equal(body.selling_price, undefined);
@@ -382,7 +382,7 @@ test("uploads the Shopify export and lets StoreBot calculate the selling price",
       product_id: "gid://shopify/Product/123",
       title: "Cotton Kurti",
       status: "DRAFT",
-      cost: "800",
+      cost: String(body.dashboard.product.cost),
       selling_price: "1120.00"
     }), { status: 201, headers: { "content-type": "application/json" } });
   };
