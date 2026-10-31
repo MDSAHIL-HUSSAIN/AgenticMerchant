@@ -189,7 +189,7 @@ test("routes dashboard previews only to the dashboard handoff", async t => {
   );
 });
 
-test("an explicit empty target channel list exports without social publishing", async t => {
+test("an explicit empty target channel list cannot disable automatic image publishing", async t => {
   const job = await makeJob();
   job.sourceChannel = "dashboard";
   job.targetChannels = [];
@@ -215,19 +215,22 @@ test("an explicit empty target channel list exports without social publishing", 
     config.publishingHandoffUrl = original.genericUrl;
     globalThis.fetch = originalFetch;
   });
-  config.instagramPublishUrl = "https://instagram.test/publish";
-  config.instagramPublishApiKey = "instagram-key";
-  config.facebookCloudinaryCloudName = "facebook-cloud";
-  config.facebookCloudinaryApiKey = "facebook-key";
-  config.facebookCloudinaryApiSecret = "facebook-secret";
-  config.facebookPublishUrl = "https://facebook.test/publish";
-  config.facebookPublishSecret = "facebook-publish-secret";
+  config.instagramPublishUrl = "";
+  config.instagramPublishApiKey = "";
+  config.facebookCloudinaryCloudName = "";
+  config.facebookCloudinaryApiKey = "";
+  config.facebookCloudinaryApiSecret = "";
+  config.facebookPublishUrl = "";
+  config.facebookPublishSecret = "";
   config.publishingHandoffUrl = "";
-  globalThis.fetch = async () => { throw new Error("No publisher should be called."); };
+  globalThis.fetch = async () => { throw new Error("An unconfigured publisher should not be called."); };
   const approved = await approveDesigns(job.id, { designIds: ["design_1"], idempotencyKey: `no-publish-${job.id}` });
   const publishing = approved.handoffs.find(item => item.type === "PUBLISHING");
   assert.equal(publishing.status, "NOT_CONFIGURED");
   assert.deepEqual(publishing.deliveries, []);
+  const socialSkips = approved.activityLogs.filter(entry => entry.stage === "PUBLISH" && ["facebook", "instagram"].includes(entry.channel));
+  assert.equal(socialSkips.length, 2);
+  assert.ok(socialSkips.every(entry => /connection is not configured/i.test(entry.message)));
 });
 
 test("processes an idempotent WhatsApp image-design request and hands back one preview", async t => {
@@ -273,6 +276,7 @@ test("processes an idempotent WhatsApp image-design request and hands back one p
 
 test("uploads the single Facebook export to Cloudinary before triggering the unchanged publisher", async t => {
   const job = await makeJob();
+  job.targetChannels = [];
   const original = {
     cloudName: config.facebookCloudinaryCloudName,
     apiKey: config.facebookCloudinaryApiKey,
@@ -327,6 +331,7 @@ test("uploads the single Facebook export to Cloudinary before triggering the unc
 
 test("sends only the approved portrait image to the Instagram publisher", async t => {
   const job = await makeJob();
+  job.targetChannels = [];
   const original = {
     instagramUrl: config.instagramPublishUrl,
     instagramKey: config.instagramPublishApiKey,

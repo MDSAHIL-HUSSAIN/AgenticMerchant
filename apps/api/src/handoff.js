@@ -367,7 +367,11 @@ export async function deliverPublishingAssets(job) {
     }))
   };
   const attempts = [];
-  const targets = requestedChannels(job);
+  // Approved images always publish to every configured image destination.
+  // Channel targeting remains meaningful for video jobs only.
+  const targets = job.type === "VIDEO_POST"
+    ? requestedChannels(job)
+    : new Set(["facebook", "instagram"]);
   activity(job, "publishing", "PUBLISHING", "STARTED", "Starting delivery to all configured social publishing destinations.", { jobType: job.type, assetCount: assets.length });
   if (targets.has("facebook") && job.type !== "VIDEO_POST" && facebookConfigured()) {
     attempts.push(

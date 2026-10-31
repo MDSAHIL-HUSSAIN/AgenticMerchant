@@ -240,7 +240,7 @@ POST /api/integrations/dashboard/messages
 POST /api/integrations/dashboard/jobs/:id/feedback
 ```
 
-Configure `DASHBOARD_HANDOFF_URL` with the dashboard's `/integrations/agentic/previews` URL. Jobs carry `sourceChannel` and are routed only to their originating service: dashboard previews never use `WHATSAPP_HANDOFF_URL`, and WhatsApp previews never use `DASHBOARD_HANDOFF_URL`. Image `targetChannels` controls Instagram and Facebook. Shopify draft creation is automatic for every approved image when its connection is configured, even when the social channel list is empty. Gemini video targets remain limited to Instagram and Facebook.
+Configure `DASHBOARD_HANDOFF_URL` with the dashboard's `/integrations/agentic/previews` URL. Jobs carry `sourceChannel` and are routed only to their originating service: dashboard previews never use `WHATSAPP_HANDOFF_URL`, and WhatsApp previews never use `DASHBOARD_HANDOFF_URL`. Every approved image automatically publishes to each configured Facebook and Instagram connector and creates a Shopify draft; image `targetChannels` cannot disable these destinations. Gemini video targets remain limited to Instagram and Facebook.
 
 The same dashboard also supports the independent Gemini web-video job endpoints under `/api/gemini-video/jobs`. It accepts `video.preview_ready` callbacks, renders the public 9:16 MP4 for review, and offers approve/publish, regenerate and reject actions. Video approval requires an explicit `confirm: true` and immediately attempts the configured Meta Reel publishers.
 
