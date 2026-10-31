@@ -1,8 +1,8 @@
 import { buildQueries, buildScenePrompts, buildSceneQueries, productIdentity, validateBrief } from "./brief.js";
 import { config } from "./config.js";
 import { createDeterministicPlan, normalizePlan, scoreCandidates } from "./planner.js";
-import { generateCloudflareBackgrounds, generateGeminiVisionPlan, researchProduct, searchPixabayImages, searchProductImages } from "./providers.js";
-import { getMediaRecord, storeMedia } from "./media-store.js";
+import { generateCloudflareBackgrounds, generateGeminiVisionPlan, removeProductBackground, researchProduct, searchPixabayImages, searchProductImages } from "./providers.js";
+import { getMediaRecord, readMedia, storeMedia } from "./media-store.js";
 import { renderWithQualityLoop } from "./quality.js";
 
 function demoAssets(brief) {
@@ -27,6 +27,73 @@ function chooseVisionAssets(ranked, indexes) {
     if (selected.length === 3) break;
   }
   return selected.slice(0, 3);
+}
+
+async function loadProductAsset(asset) {
+  if (asset.assetId) {
+    const stored = await readMedia(asset.assetId);
+    return { bytes: stored.bytes, mimeType: stored.record.mimeType, filename: stored.record.filename };
+  }
+  const url = String(asset.url || asset.thumbnail || "");
+  if (!/^https?:\/\//i.test(url)) throw new Error("The selected product image has no downloadable URL.");
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(30_000),
+    headers: { "user-agent": "AgenticProductCutout/1.0" }
+  });
+  if (!response.ok) throw new Error(`Selected product image returned HTTP ${response.status}.`);
+  const mimeType = (response.headers.get("content-type") || "").split(";")[0];
+  if (!mimeType.startsWith("image/")) throw new Error("The selected product asset is not an image.");
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > 22 * 1024 * 1024) throw new Error("The selected product image exceeds 22 MB.");
+  return { bytes, mimeType, filename: `product.${mimeType.includes("png") ? "png" : mimeType.includes("webp") ? "webp" : "jpg"}` };
+}
+
+async function prepareProductCutouts({ assets, designs, jobId, log, warnings }) {
+  if (config.demoMode || !config.removeBgApiKey) {
+    log("BACKGROUND_REMOVAL", "SKIPPED", config.demoMode
+      ? "Product background removal is disabled in demo mode."
+      : "REMOVE_BG_API_KEY is not configured; selected product images will retain their original backgrounds.");
+    return assets;
+  }
+
+  const prepared = [...assets];
+  const indexes = [...new Set(designs.map(design => Number(design.imageIndex)).filter(index => Number.isInteger(index) && assets[index]))];
+  log("BACKGROUND_REMOVAL", "STARTED", `Removing the background from ${indexes.length} selected product image(s).`, { assetIndexes: indexes });
+  let completed = 0;
+  for (const index of indexes) {
+    try {
+      const source = await loadProductAsset(assets[index]);
+      const cutout = await removeProductBackground(source);
+      const stored = await storeMedia({
+        bytes: cutout.bytes,
+        mimeType: cutout.mimeType,
+        filename: `${jobId}-product-${index + 1}-cutout.png`,
+        kind: "PRODUCT_CUTOUT",
+        metadata: { designJobId: jobId, sourceAssetIndex: index, backgroundRemoved: true }
+      });
+      prepared[index] = {
+        ...assets[index],
+        assetId: stored.id,
+        title: `${assets[index].title || "Product image"} — transparent cutout`,
+        source: `${assets[index].source || "Product source"} · background removed`,
+        backgroundRemoved: true
+      };
+      completed += 1;
+      log("BACKGROUND_REMOVAL", "SUCCESS", `Prepared transparent product cutout ${completed} of ${indexes.length}.`, {
+        assetIndex: index,
+        assetId: stored.id,
+        bytes: stored.byteLength,
+        creditsCharged: cutout.creditsCharged
+      });
+    } catch (error) {
+      warnings.push(`Product background removal failed for selected image ${index + 1}: ${error.message}`);
+      log("BACKGROUND_REMOVAL", "FAILED", `Could not remove the background from selected product image ${index + 1}; retaining the original.`, {
+        assetIndex: index,
+        error: error.message
+      });
+    }
+  }
+  return prepared;
 }
 
 export async function createDesignJob(rawBrief, options = {}) {
@@ -140,6 +207,7 @@ export async function createDesignJob(rawBrief, options = {}) {
     id: design.id || `design_${index + 1}`,
     backgroundIndex: backgroundAssets.length ? index % backgroundAssets.length : -1
   }));
+  selectedAssets = await prepareProductCutouts({ assets: selectedAssets, designs, jobId, log, warnings });
   let rendered = null;
   try {
     log("IMAGE_RENDER", "STARTED", `Rendering ${designs.length} final image composition(s) and running quality checks.`);

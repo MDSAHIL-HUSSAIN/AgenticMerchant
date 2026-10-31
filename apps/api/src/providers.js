@@ -41,6 +41,36 @@ export async function researchProduct(query) {
   return (data.results || []).map(result => ({ title: result.title, url: result.url, content: result.content }));
 }
 
+export async function removeProductBackground({ bytes, mimeType = "image/jpeg", filename = "product-image" }) {
+  if (!config.removeBgApiKey) return null;
+  if (!Buffer.isBuffer(bytes) || !bytes.length) throw new Error("Product image bytes are required for background removal.");
+  if (bytes.length > 22 * 1024 * 1024) throw new Error("Product image exceeds remove.bg's 22 MB input limit.");
+
+  const form = new FormData();
+  form.set("image_file", new Blob([bytes], { type: mimeType }), filename);
+  form.set("size", config.removeBgSize);
+  form.set("type", "product");
+  form.set("format", "png");
+
+  const response = await fetch("https://api.remove.bg/v1.0/removebg", {
+    method: "POST",
+    headers: { "X-Api-Key": config.removeBgApiKey },
+    body: form,
+    signal: AbortSignal.timeout(120_000)
+  });
+  if (!response.ok) {
+    const detail = (await response.text()).replace(/\s+/g, " ").slice(0, 600);
+    throw new Error(`remove.bg returned ${response.status}${detail ? `: ${detail}` : ""}`);
+  }
+  const result = Buffer.from(await response.arrayBuffer());
+  if (!result.length) throw new Error("remove.bg returned an empty image.");
+  return {
+    bytes: result,
+    mimeType: "image/png",
+    creditsCharged: response.headers.get("x-credits-charged") || null
+  };
+}
+
 export async function generateGeminiPlan(payload) {
   if (!config.geminiApiKey) return null;
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.geminiModel)}:generateContent?key=${encodeURIComponent(config.geminiApiKey)}`;

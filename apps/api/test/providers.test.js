@@ -1,7 +1,44 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { config } from "../src/config.js";
-import { generateCloudflareBackground, searchPixabayImages } from "../src/providers.js";
+import { generateCloudflareBackground, removeProductBackground, searchPixabayImages } from "../src/providers.js";
+
+test("removes a selected product background as a reusable transparent PNG", async t => {
+  const original = {
+    key: config.removeBgApiKey,
+    size: config.removeBgSize,
+    fetch: globalThis.fetch
+  };
+  t.after(() => {
+    config.removeBgApiKey = original.key;
+    config.removeBgSize = original.size;
+    globalThis.fetch = original.fetch;
+  });
+  config.removeBgApiKey = "remove-bg-test-key";
+  config.removeBgSize = "auto";
+  globalThis.fetch = async (url, options) => {
+    assert.equal(String(url), "https://api.remove.bg/v1.0/removebg");
+    assert.equal(options.method, "POST");
+    assert.equal(options.headers["X-Api-Key"], "remove-bg-test-key");
+    assert.equal(options.body.get("size"), "auto");
+    assert.equal(options.body.get("type"), "product");
+    assert.equal(options.body.get("format"), "png");
+    assert.equal(options.body.get("image_file").type, "image/jpeg");
+    return new Response(Buffer.from("transparent-png"), {
+      status: 200,
+      headers: { "content-type": "image/png", "x-credits-charged": "1" }
+    });
+  };
+
+  const result = await removeProductBackground({
+    bytes: Buffer.from("source-image"),
+    mimeType: "image/jpeg",
+    filename: "product.jpg"
+  });
+  assert.equal(result.mimeType, "image/png");
+  assert.equal(result.bytes.toString(), "transparent-png");
+  assert.equal(result.creditsCharged, "1");
+});
 
 test("maps Pixabay results into attributed background assets", async t => {
   const originalKey = config.pixabayApiKey;

@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { generateWithGeminiWeb } from "./gemini-browser.mjs";
 import { inspectOriginalMp4 } from "./mp4-validator.mjs";
 import { planGeminiPrompt } from "./qwen-story-planner.mjs";
@@ -15,8 +16,8 @@ const cfg = {
   ollamaModel: process.env.OLLAMA_PLANNER_MODEL || "qwen3:4b", qwenRequired: String(process.env.QWEN_REQUIRED || "true").toLowerCase() !== "false",
   pollMs: Math.max(5000, Number(process.env.WORKER_POLL_SECONDS || 15) * 1000),
   generationTimeoutMs: Math.max(5, Number(process.env.GEMINI_GENERATION_TIMEOUT_MINUTES || 20)) * 60_000,
-  downloadDir: resolve(process.env.GEMINI_DOWNLOAD_DIR || new URL("./downloads", import.meta.url).pathname.replace(/^\/(\w:)/, "$1")),
-  logFile: resolve(process.env.GEMINI_WORKER_LOG_FILE || new URL("./logs/worker.log", import.meta.url).pathname.replace(/^\/(\w:)/, "$1")),
+  downloadDir: resolve(process.env.GEMINI_DOWNLOAD_DIR || fileURLToPath(new URL("./downloads", import.meta.url))),
+  logFile: resolve(process.env.GEMINI_WORKER_LOG_FILE || fileURLToPath(new URL("./logs/worker.log", import.meta.url))),
   promptSelector: process.env.GEMINI_PROMPT_SELECTOR || "", videoModeSelector: process.env.GEMINI_VIDEO_MODE_SELECTOR || "",
   downloadSelector: process.env.GEMINI_DOWNLOAD_SELECTOR || "",
   textResponseGraceMs: Math.max(10, Number(process.env.GEMINI_TEXT_RESPONSE_GRACE_SECONDS || 20)) * 1000

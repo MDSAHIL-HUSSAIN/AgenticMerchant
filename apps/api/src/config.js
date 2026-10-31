@@ -53,6 +53,10 @@ export const config = {
   shopifyPublishSecret: process.env.SHOPIFY_PUBLISH_SECRET || "",
   serpApiKey: process.env.SERPAPI_KEY || "",
   tavilyApiKey: process.env.TAVILY_API_KEY || "",
+  removeBgApiKey: process.env.REMOVE_BG_API_KEY || "",
+  removeBgSize: ["preview", "full", "auto", "50MP"].includes(process.env.REMOVE_BG_SIZE || "auto")
+    ? process.env.REMOVE_BG_SIZE || "auto"
+    : "auto",
   geminiApiKey: process.env.GEMINI_API_KEY || "",
   geminiModel: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
   geminiWebVideoEnabled: String(process.env.GEMINI_WEB_VIDEO_ENABLED ?? "false").toLowerCase() === "true",
@@ -134,6 +138,7 @@ export function providerStatus() {
     mode: config.demoMode ? "demo" : "live",
     serpApi: Boolean(config.serpApiKey),
     tavily: Boolean(config.tavilyApiKey),
+    backgroundRemoval: Boolean(config.removeBgApiKey),
     gemini: Boolean(config.geminiApiKey),
     geminiWebVideo: config.geminiWebVideoEnabled,
     geminiVideoStorage: Boolean(config.videoStorageBucket && config.videoStoragePublicBaseUrl),

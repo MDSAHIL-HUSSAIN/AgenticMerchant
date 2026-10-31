@@ -16,7 +16,7 @@ services:
       - key: NODE_VERSION
         value: 22.16.0
       - key: DEMO_MODE
-        value: "true"
+        value: "false"
       - key: DESIGN_COUNT
         value: "1"
       - key: VIDEO_POST_ENABLED
@@ -62,6 +62,22 @@ services:
       - key: DASHBOARD_HANDOFF_URL
         sync: false
       - key: INTERNAL_SERVICE_TOKEN
+        sync: false
+      - key: SERPAPI_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: REMOVE_BG_API_KEY
+        sync: false
+      - key: REMOVE_BG_SIZE
+        value: auto
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PIXABAY_API_KEY
+        sync: false
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_API_TOKEN
         sync: false
       - key: SHOPIFY_CLOUDINARY_CLOUD_NAME
         sync: false

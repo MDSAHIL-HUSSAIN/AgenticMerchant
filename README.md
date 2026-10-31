@@ -95,6 +95,12 @@ npm run demo
 
 The demo accepts a product brief plus optional product/reference images and creates either one best campaign image or one autonomously directed product film. Both support revisions, approval, and platform exports. It uses the same private binary asset endpoints as the integration pipeline. With the default `DEMO_MODE=true`, it does not call external image search, Gemini, Cloudflare or other quota-limited providers.
 
+## Live image pipeline
+
+Set `DEMO_MODE=false` to enable live product discovery and provider-backed art direction. For a searched product image, configure `SERPAPI_KEY`, `GEMINI_API_KEY`, and `REMOVE_BG_API_KEY`. The selected design image is downloaded once, sent to remove.bg as a product, stored as a transparent PNG, and reused by rendering and later revisions. A removal failure is logged and falls back to the original selected image instead of failing the job. `REMOVE_BG_SIZE=auto` requests the best resolution available for the account.
+
+`TAVILY_API_KEY` adds factual product research. `PIXABAY_API_KEY` supplies optional stock scene backgrounds. `CLOUDFLARE_ACCOUNT_ID` plus `CLOUDFLARE_API_TOKEN` generates original scene backgrounds. These three integrations are optional; native design geometry remains available when they are absent. `AUTONOMOUS_VISION_QA=true` is recommended when Gemini is configured so the final composition receives an additional visual review.
+
 ## Autonomous video posts
 
 Queue a vertical film from an existing product draft:

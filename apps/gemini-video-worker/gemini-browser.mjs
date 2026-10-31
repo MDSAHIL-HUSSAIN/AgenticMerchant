@@ -46,7 +46,10 @@ async function selectVideoMode(page, selector, log, jobId) {
     await tools.click({ timeout: 10_000 });
     const menuVideo = page.getByRole("menuitem", { name: /create video|video/i })
       .or(page.getByText(/^create video$/i)).or(page.getByText(/^video$/i)).last();
-    if (await menuVideo.count() && await menuVideo.isVisible().catch(() => false)) {
+    const menuVideoVisible = await menuVideo.waitFor({ state: "visible", timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (menuVideoVisible) {
       await menuVideo.click({ timeout: 10_000 });
       log("INFO", "gemini_video_mode_selected", { jobId, method: "tools_menu" });
       return true;

@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { validateBrief } from "../src/brief.js";
 import { createDeterministicPlan } from "../src/planner.js";
 import { renderWithQualityLoop } from "../src/quality.js";
-import { storeMedia } from "../src/media-store.js";
+import { readMedia, storeMedia } from "../src/media-store.js";
+import { createDesignJob } from "../src/orchestrator.js";
 import { registerJob } from "../src/job-store.js";
 import { applyFeedbackRevision } from "../src/revisions.js";
 import { approveDesigns } from "../src/approvals.js";
@@ -38,6 +39,61 @@ async function makeJob() {
     warnings: []
   }, { merchantId: "merchant-test", conversationId: `conversation-${id}` });
 }
+
+test("stores one transparent product cutout before rendering a live image design", async t => {
+  const original = {
+    demoMode: config.demoMode,
+    removeBgApiKey: config.removeBgApiKey,
+    removeBgSize: config.removeBgSize,
+    geminiApiKey: config.geminiApiKey,
+    pixabayApiKey: config.pixabayApiKey,
+    cloudflareAccountId: config.cloudflareAccountId,
+    cloudflareApiToken: config.cloudflareApiToken,
+    fetch: globalThis.fetch
+  };
+  t.after(() => {
+    config.demoMode = original.demoMode;
+    config.removeBgApiKey = original.removeBgApiKey;
+    config.removeBgSize = original.removeBgSize;
+    config.geminiApiKey = original.geminiApiKey;
+    config.pixabayApiKey = original.pixabayApiKey;
+    config.cloudflareAccountId = original.cloudflareAccountId;
+    config.cloudflareApiToken = original.cloudflareApiToken;
+    globalThis.fetch = original.fetch;
+  });
+  Object.assign(config, {
+    demoMode: false,
+    removeBgApiKey: "remove-bg-key",
+    removeBgSize: "auto",
+    geminiApiKey: "",
+    pixabayApiKey: "",
+    cloudflareAccountId: "",
+    cloudflareApiToken: ""
+  });
+  const sourceBytes = await sharp({
+    create: { width: 220, height: 280, channels: 3, background: "#ffffff" }
+  }).png().toBuffer();
+  const cutoutBytes = await sharp({
+    create: { width: 220, height: 280, channels: 4, background: { r: 190, g: 70, b: 30, alpha: 0.7 } }
+  }).png().toBuffer();
+  const source = await storeMedia({ bytes: sourceBytes, mimeType: "image/png", filename: "source-product.png", kind: "PRIMARY_PRODUCT" });
+  let removalCalls = 0;
+  globalThis.fetch = async (url, options) => {
+    assert.equal(String(url), "https://api.remove.bg/v1.0/removebg");
+    assert.equal(options.body.get("type"), "product");
+    removalCalls += 1;
+    return new Response(cutoutBytes, { status: 200, headers: { "content-type": "image/png", "x-credits-charged": "1" } });
+  };
+
+  const job = await createDesignJob({ product: "Orange Sneaker", brand: "Example" }, { productAssetIds: [source.id] });
+  assert.equal(removalCalls, 1);
+  assert.equal(job.assets[0].backgroundRemoved, true);
+  assert.notEqual(job.assets[0].assetId, source.id);
+  const storedCutout = await readMedia(job.assets[0].assetId);
+  assert.equal(storedCutout.record.kind, "PRODUCT_CUTOUT");
+  assert.equal((await sharp(storedCutout.bytes).metadata()).hasAlpha, true);
+  assert.ok(job.activityLogs.some(entry => entry.stage === "BACKGROUND_REMOVAL" && entry.status === "SUCCESS"));
+});
 
 test("creates an immutable revision from merchant feedback", async () => {
   const job = await makeJob();
