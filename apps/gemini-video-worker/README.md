@@ -10,3 +10,9 @@ This Windows worker claims durable video jobs from Agentic on Render, asks local
 4. Keep the BAT window running. Chrome can remain minimized after login.
 
 The worker does not bypass CAPTCHA, account confirmation, reauthentication, quotas, or any other Google control. If the Gemini UI changes, update the optional selectors in `.env`.
+
+## Logs and text-only Gemini responses
+
+The BAT window now prints timestamped JSON events for job claiming, Qwen planning, Chrome connection, video-mode selection, Gemini waiting time, download, validation, upload, completion, heartbeats, API response codes and failures. The same output is retained in `logs/worker.log` by default; change `GEMINI_WORKER_LOG_FILE` to use another location.
+
+Selecting **Create video** is mandatory. If the control cannot be found, the worker stops that job before submitting the prompt as ordinary chat. If Gemini returns an explanation, production breakdown, VideoFX instructions or another stable text response instead of a downloadable video, the worker reports a non-retryable failure after `GEMINI_TEXT_RESPONSE_GRACE_SECONDS` rather than waiting for the full generation timeout or repeatedly consuming attempts.

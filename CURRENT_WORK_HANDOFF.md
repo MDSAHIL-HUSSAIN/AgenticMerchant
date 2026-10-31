@@ -299,6 +299,22 @@ Do not break these while deploying video:
 - The dashboard stores its own inventory/conversation/video display state. Agentic stores Gemini job state separately. Each deployed service needs durable PostgreSQL configuration.
 - Never commit `.env`, tokens, Google profiles, downloaded account data, or storage credentials.
 
+## Latest reliability and logging fix
+
+Gemini once answered with a written production breakdown beginning `While this text interface cannot directly render and export an .mp4...` instead of generating a video. The old worker silently ignored failure to select video mode and then waited for a download button until the full timeout.
+
+The current uncommitted fix changes this behavior:
+
+- Selecting Gemini's **Create video** control is mandatory; failure stops before submitting ordinary chat.
+- The worker tries a direct Create video control and the Gemini Tools menu, with `GEMINI_VIDEO_MODE_SELECTOR` available for UI changes.
+- Instructional/stable text-only answers are detected after `GEMINI_TEXT_RESPONSE_GRACE_SECONDS` (default 20 seconds).
+- Text-only and missing-video-mode errors are non-retryable, preventing repeated wasted generations.
+- The BAT console prints timestamped structured events for claiming, planning, Chrome, video-mode selection, waiting, download, validation, upload, heartbeats and failures.
+- Worker logs persist locally at `apps/gemini-video-worker/logs/worker.log` by default and are Git-ignored.
+- Render logs now include HTTP response status and elapsed time, plus durable Gemini job-stage events and dashboard callback results.
+
+After committing/pushing these Agentic changes, redeploy the Agentic Render API and restart the local BAT worker so both logging improvements take effect.
+
 ## Useful commands
 
 Agentic:

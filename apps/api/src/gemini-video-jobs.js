@@ -13,8 +13,14 @@ const now = () => new Date().toISOString();
 
 function log(job, stage, message, details = null) {
   if (!Array.isArray(job.events)) job.events = [];
-  job.events.push({ id: randomUUID(), at: now(), stage, message: clean(message, 500), ...(details ? { details } : {}) });
+  const event = { id: randomUUID(), at: now(), stage, message: clean(message, 500), ...(details ? { details } : {}) };
+  job.events.push(event);
   if (job.events.length > 100) job.events.splice(0, job.events.length - 100);
+  console.log(JSON.stringify({
+    at: event.at, event: "gemini_video_job", jobId: job.id, merchantId: job.merchantId,
+    stage, message: event.message, generationAttempt: job.generationAttempt,
+    ...(details ? { details } : {})
+  }));
 }
 
 function assertEnabled() {
@@ -42,7 +48,10 @@ function assertWorker(job, workerId) {
 }
 
 async function notifyDashboard(job) {
-  if (job.sourceChannel !== "dashboard" || !config.dashboardHandoffUrl) return null;
+  if (job.sourceChannel !== "dashboard" || !config.dashboardHandoffUrl) {
+    console.log(JSON.stringify({ at: now(), event: "gemini_video_dashboard_handoff_skipped", jobId: job.id, sourceChannel: job.sourceChannel, dashboardConfigured: Boolean(config.dashboardHandoffUrl) }));
+    return null;
+  }
   try {
     const response = await fetch(config.dashboardHandoffUrl, {
       method: "POST",
@@ -61,8 +70,10 @@ async function notifyDashboard(job) {
       signal: AbortSignal.timeout(20_000)
     });
     if (!response.ok) throw new Error(`Dashboard returned HTTP ${response.status}.`);
+    console.log(JSON.stringify({ at: now(), event: "gemini_video_dashboard_handoff", jobId: job.id, status: response.status }));
     return { status: "DELIVERED", at: now() };
   } catch (error) {
+    console.error(JSON.stringify({ at: now(), event: "gemini_video_dashboard_handoff_failed", jobId: job.id, error: clean(error.message, 300) }));
     return { status: "FAILED", at: now(), error: clean(error.message, 300) };
   }
 }

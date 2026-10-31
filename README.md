@@ -36,6 +36,8 @@ dashboard request
 
 This path does not invoke the image pipeline when no product image exists and does not use FFmpeg, editing, transitions, overlays, LTX or FramePack. Chrome opens minimized and may remain minimized after the first interactive login. The local PC, Chrome profile, Ollama/Qwen and BAT worker must remain available while jobs are processed. Automating the consumer Gemini website is experimental and subject to Google's UI, account controls, quotas and terms.
 
+The worker requires Gemini's **Create video** mode before it submits a prompt. If that control is unavailable, or Gemini returns a production breakdown/instructions instead of a downloadable MP4, the job fails clearly and does not wait indefinitely or repeat a non-retryable attempt. Timestamped worker events are shown in the BAT window and saved to `apps/gemini-video-worker/logs/worker.log`; Render logs include job stages, callback outcomes, HTTP status and request duration.
+
 ## Current pipeline
 
 ```text

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node worker.mjs",
-    "check": "node --check worker.mjs"
+    "check": "node --check worker.mjs && node --check gemini-browser.mjs",
+    "test": "node --test gemini-browser.test.mjs"
   },
   "dependencies": {
     "mp4box": "^2.3.0",

@@ -7,6 +7,7 @@ temp/
 apps/api/data/
 apps/api/node_modules/
 apps/gemini-video-worker/downloads/
+apps/gemini-video-worker/logs/
 apps/design-agent-adobe/node_modules/
 apps/design-agent-adobe/dist/
 # The teammate bot remains in its own Git repository and Render service.

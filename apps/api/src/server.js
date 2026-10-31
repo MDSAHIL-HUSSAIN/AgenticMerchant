@@ -57,8 +57,20 @@ const enabled = value => value === true || value === 1 || /^(true|1|yes)$/i.test
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "8mb" }));
 app.use(express.static(fileURLToPath(new URL("../public", import.meta.url))));
-app.use((request, _response, next) => {
-  console.log(`${new Date().toISOString()} ${request.method} ${request.path}`);
+app.use((request, response, next) => {
+  const startedAt = Date.now();
+  response.on("finish", () => {
+    const routineProbe = request.path === "/health" || request.path === "/api/video-worker/jobs/claim";
+    if (routineProbe && response.statusCode < 400) return;
+    const jobId = request.body?.videoJobId
+      || request.path.match(/\/(gvideo_[a-f0-9-]+)(?:\/|$)/i)?.[1]
+      || "";
+    console.log(JSON.stringify({
+      at: new Date().toISOString(), event: "http_request", method: request.method,
+      path: request.path, status: response.statusCode, elapsedMs: Date.now() - startedAt,
+      ...(jobId ? { jobId: String(jobId).slice(0, 100) } : {})
+    }));
+  });
   next();
 });
 
