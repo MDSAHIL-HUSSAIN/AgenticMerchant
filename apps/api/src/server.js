@@ -20,6 +20,13 @@ import { cancelVideoJob, createVideoJob, recoverVideoJobs, retryVideoJob, videoE
 import { getVideoWorkerHealth } from "./video-worker-client.js";
 import { processDashboardFeedback, processDashboardMessage, processWhatsAppFeedback, processWhatsAppMessage } from "./whatsapp-integration.js";
 import { activityTrace, finishActivity, publishActivity } from "./activity-stream.js";
+import {
+  approveGeminiVideoJob, claimNextGeminiVideoJob, completeGeminiVideoJob, createGeminiVideoJob,
+  failGeminiVideoJob, getPublicGeminiVideoJob, heartbeatGeminiVideo, issueGeminiVideoUploadTicket,
+  listPublicGeminiVideoJobs, rejectGeminiVideoJob, retryGeminiVideoJob, updateGeminiVideoProgress
+} from "./gemini-video-jobs.js";
+import { initGeminiVideoStore } from "./gemini-video-store.js";
+import { videoStorageStatus } from "./gemini-video-storage.js";
 
 const app = express();
 const imageCache = new Map();
@@ -40,6 +47,12 @@ function requireInternalService(request, response, next) {
   }
   next();
 }
+function requireGeminiVideoWorker(request, response, next) {
+  const token = config.geminiVideoWorkerToken || config.internalServiceToken;
+  if (!token) return response.status(503).json({ error: "GEMINI_VIDEO_WORKER_TOKEN is not configured." });
+  if (request.headers.authorization !== `Bearer ${token}`) return response.status(401).json({ error: "Unauthorized video worker request." });
+  next();
+}
 const enabled = value => value === true || value === 1 || /^(true|1|yes)$/i.test(String(value || ""));
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "8mb" }));
@@ -56,6 +69,66 @@ app.get("/api/video-worker/health", async (_request, response) => {
   } catch (error) {
     response.status(503).json({ ok: false, error: error.message || "Video worker is unavailable." });
   }
+});
+
+app.post("/api/gemini-video/jobs", requireInternalService, async (request, response) => {
+  try { response.status(202).json(await createGeminiVideoJob(request.body)); }
+  catch (error) { response.status(error.status || 400).json({ error: error.message }); }
+});
+
+app.get("/api/gemini-video/jobs", requireInternalService, async (request, response) => {
+  try { response.json({ jobs: await listPublicGeminiVideoJobs({ merchantId: request.query.merchantId, limit: request.query.limit }) }); }
+  catch (error) { response.status(error.status || 400).json({ error: error.message }); }
+});
+
+app.get("/api/gemini-video/jobs/:id", requireInternalService, async (request, response) => {
+  try { response.json(await getPublicGeminiVideoJob(request.params.id)); }
+  catch (error) { response.status(error.status || 400).json({ error: error.message }); }
+});
+
+app.post("/api/gemini-video/jobs/:id/approve", requireInternalService, async (request, response) => {
+  try { response.json(await approveGeminiVideoJob(request.params.id, request.body)); }
+  catch (error) { response.status(error.status || 400).json({ error: error.message }); }
+});
+
+app.post("/api/gemini-video/jobs/:id/reject", requireInternalService, async (request, response) => {
+  try { response.json(await rejectGeminiVideoJob(request.params.id, request.body.reason)); }
+  catch (error) { response.status(error.status || 400).json({ error: error.message }); }
+});
+
+app.post("/api/gemini-video/jobs/:id/retry", requireInternalService, async (request, response) => {
+  try { response.status(202).json(await retryGeminiVideoJob(request.params.id)); }
+  catch (error) { response.status(error.status || 400).json({ error: error.message }); }
+});
+
+app.post("/api/video-worker/jobs/claim", requireGeminiVideoWorker, async (request, response) => {
+  try { response.json({ job: await claimNextGeminiVideoJob(request.body.workerId) }); }
+  catch (error) { response.status(error.status || 400).json({ error: error.message }); }
+});
+
+app.post("/api/video-worker/jobs/:id/heartbeat", requireGeminiVideoWorker, async (request, response) => {
+  try { response.json(await heartbeatGeminiVideo(request.params.id, request.body.workerId)); }
+  catch (error) { response.status(error.status || 400).json({ error: error.message }); }
+});
+
+app.post("/api/video-worker/jobs/:id/progress", requireGeminiVideoWorker, async (request, response) => {
+  try { response.json(await updateGeminiVideoProgress(request.params.id, request.body.workerId, request.body)); }
+  catch (error) { response.status(error.status || 400).json({ error: error.message }); }
+});
+
+app.post("/api/video-worker/jobs/:id/upload-ticket", requireGeminiVideoWorker, async (request, response) => {
+  try { response.json(await issueGeminiVideoUploadTicket(request.params.id, request.body.workerId)); }
+  catch (error) { response.status(error.status || 400).json({ error: error.message }); }
+});
+
+app.post("/api/video-worker/jobs/:id/complete", requireGeminiVideoWorker, async (request, response) => {
+  try { response.json(await completeGeminiVideoJob(request.params.id, request.body.workerId, request.body)); }
+  catch (error) { response.status(error.status || 400).json({ error: error.message }); }
+});
+
+app.post("/api/video-worker/jobs/:id/fail", requireGeminiVideoWorker, async (request, response) => {
+  try { response.json(await failGeminiVideoJob(request.params.id, request.body.workerId, request.body)); }
+  catch (error) { response.status(error.status || 400).json({ error: error.message }); }
 });
 
 app.post("/api/jobs", async (request, response) => {
@@ -190,6 +263,17 @@ app.get("/api/activity/:traceId/events", (request, response) => {
 
 app.post("/api/product-drafts/:id/video", async (request, response) => {
   try {
+    if (config.geminiWebVideoEnabled && String(request.body.provider || "gemini_web").toLowerCase() === "gemini_web") {
+      const input = draftToDesignInput(request.params.id);
+      response.status(202).json(await createGeminiVideoJob({
+        ...request.body,
+        brief: input.brief,
+        merchantId: input.draft.merchantId,
+        conversationId: input.draft.conversationId,
+        sourceChannel: input.draft.sourceChannel || "dashboard"
+      }));
+      return;
+    }
     if (!config.videoPostEnabled) throw new Error("Video posts are disabled. Set VIDEO_POST_ENABLED=true after configuring the local worker.");
     const input = draftToDesignInput(request.params.id);
     const job = createVideoJob(input.brief, {
@@ -484,4 +568,5 @@ app.get("/api/image", async (request, response) => {
 });
 
 const recoveredVideoJobs = config.videoPostEnabled ? recoverVideoJobs() : 0;
-app.listen(config.port, () => console.log(`Design Agent API running at http://localhost:${config.port} (${config.demoMode ? "demo" : "live"} mode)${recoveredVideoJobs ? `; recovered ${recoveredVideoJobs} video job(s)` : ""}`));
+await initGeminiVideoStore();
+app.listen(config.port, () => console.log(`Design Agent API running at http://localhost:${config.port} (${config.demoMode ? "demo" : "live"} mode)${recoveredVideoJobs ? `; recovered ${recoveredVideoJobs} video job(s)` : ""}; Gemini web video storage: ${videoStorageStatus().configured ? "ready" : "not configured"}`));

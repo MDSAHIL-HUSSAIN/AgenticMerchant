@@ -1,3 +1,7 @@
+databases:
+  - name: agentic-video-jobs-db
+    plan: free
+
 services:
   - type: web
     name: agentic-image-api
@@ -17,6 +21,38 @@ services:
         value: "1"
       - key: VIDEO_POST_ENABLED
         value: "false"
+      - key: GEMINI_WEB_VIDEO_ENABLED
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agentic-video-jobs-db
+          property: connectionString
+      - key: DATABASE_SSL
+        value: "true"
+      - key: GEMINI_VIDEO_WORKER_TOKEN
+        sync: false
+      - key: GEMINI_VIDEO_LEASE_SECONDS
+        value: "600"
+      - key: VIDEO_STORAGE_ENDPOINT
+        sync: false
+      - key: VIDEO_STORAGE_REGION
+        value: auto
+      - key: VIDEO_STORAGE_BUCKET
+        sync: false
+      - key: VIDEO_STORAGE_ACCESS_KEY_ID
+        sync: false
+      - key: VIDEO_STORAGE_SECRET_ACCESS_KEY
+        sync: false
+      - key: VIDEO_STORAGE_PUBLIC_BASE_URL
+        sync: false
+      - key: META_GRAPH_VERSION
+        value: v24.0
+      - key: META_INSTAGRAM_ACCOUNT_ID
+        sync: false
+      - key: META_FACEBOOK_PAGE_ID
+        sync: false
+      - key: META_PAGE_ACCESS_TOKEN
+        sync: false
       - key: DATA_DIR
         value: /tmp/agentic-data
       - key: STATE_DB_PATH
