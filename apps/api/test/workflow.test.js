@@ -201,6 +201,7 @@ test("processes an idempotent WhatsApp image-design request and hands back one p
       messageId,
       productName: "Cotton Kurti",
       brand: "Kavya Boutique",
+      cost: 800,
       mediaRoles: { media: "PRIMARY_PRODUCT" }
     },
     text: "Cotton Kurti by Kavya Boutique, soft cotton festive wear",
@@ -325,4 +326,71 @@ test("sends only the approved portrait image to the Instagram publisher", async 
   assert.equal(delivery.status, "DELIVERED");
   assert.equal(delivery.deliveries[0].channel, "instagram");
   assert.equal(delivery.deliveries[0].instagramPostId, "ig-post-789");
+});
+
+test("uploads the Shopify export and lets StoreBot calculate the selling price", async t => {
+  const job = await makeJob();
+  job.targetChannels = ["shopify"];
+  job.commerce = { cost: 800, sku: "KURTI-001", vendor: "Kavya Boutique", productType: "Apparel" };
+  const original = {
+    cloudName: config.shopifyCloudinaryCloudName,
+    apiKey: config.shopifyCloudinaryApiKey,
+    apiSecret: config.shopifyCloudinaryApiSecret,
+    publishUrl: config.shopifyPublishUrl,
+    publishSecret: config.shopifyPublishSecret,
+    genericUrl: config.publishingHandoffUrl,
+    fetch: globalThis.fetch
+  };
+  t.after(() => {
+    config.shopifyCloudinaryCloudName = original.cloudName;
+    config.shopifyCloudinaryApiKey = original.apiKey;
+    config.shopifyCloudinaryApiSecret = original.apiSecret;
+    config.shopifyPublishUrl = original.publishUrl;
+    config.shopifyPublishSecret = original.publishSecret;
+    config.publishingHandoffUrl = original.genericUrl;
+    globalThis.fetch = original.fetch;
+  });
+  config.shopifyCloudinaryCloudName = "shopify-cloud";
+  config.shopifyCloudinaryApiKey = "shopify-key";
+  config.shopifyCloudinaryApiSecret = "shopify-secret";
+  config.shopifyPublishUrl = "https://storebot-shopify.example/process";
+  config.shopifyPublishSecret = "webhook-secret";
+  config.publishingHandoffUrl = "";
+  let call = 0;
+  globalThis.fetch = async (url, options) => {
+    call += 1;
+    if (call === 1) {
+      assert.equal(url, "https://api.cloudinary.com/v1_1/shopify-cloud/image/upload");
+      assert.ok(options.body.get("file") instanceof Blob);
+      assert.match(options.body.get("public_id"), /^storebot\/shopify\//);
+      return new Response(JSON.stringify({
+        public_id: options.body.get("public_id"),
+        secure_url: "https://res.cloudinary.com/shopify-cloud/image/upload/product.png"
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    assert.equal(url, config.shopifyPublishUrl);
+    assert.equal(options.headers.authorization, "Bearer webhook-secret");
+    assert.equal(options.headers["idempotency-key"], `shopify:${job.id}:${job.currentRevisionId}`);
+    const body = JSON.parse(options.body);
+    assert.equal(body.approved, true);
+    assert.equal(body.dashboard.product.cost, 800);
+    assert.equal(body.dashboard.product.sku, "KURTI-001");
+    assert.equal(body.dashboard.product.price, undefined);
+    assert.equal(body.selling_price, undefined);
+    return new Response(JSON.stringify({
+      message: "Product created successfully.",
+      product_id: "gid://shopify/Product/123",
+      title: "Cotton Kurti",
+      status: "DRAFT",
+      cost: "800",
+      selling_price: "1120.00"
+    }), { status: 201, headers: { "content-type": "application/json" } });
+  };
+  const approved = await approveDesigns(job.id, { designIds: ["design_1"], idempotencyKey: `shopify-approve-${job.id}` });
+  assert.equal(call, 2);
+  const delivery = approved.handoffs.find(item => item.type === "PUBLISHING");
+  assert.equal(delivery.status, "DELIVERED");
+  assert.equal(delivery.deliveries[0].channel, "shopify");
+  assert.equal(delivery.deliveries[0].shopifyProductId, "gid://shopify/Product/123");
+  assert.equal(delivery.deliveries[0].sellingPrice, "1120.00");
 });

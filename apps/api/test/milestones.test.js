@@ -11,6 +11,7 @@ test("collects a multimodal product draft and prepares a normalized design input
     conversationId: `conversation-${crypto.randomUUID()}`,
     productName: "Cotton Kurti",
     brand: "Kavya Boutique",
+    cost: 500,
     price: 799,
     sizes: ["M", "L"],
     mediaRoles: { product_image: "PRIMARY_PRODUCT" }
@@ -35,7 +36,7 @@ test("collects a multimodal product draft and prepares a normalized design input
 
 test("pauses an ambiguous image until its role is clarified", async () => {
   const draft = await addDraftMessage({
-    metadata: { merchantId: "merchant-test", conversationId: `conversation-${crypto.randomUUID()}`, productName: "Leather Bag" },
+    metadata: { merchantId: "merchant-test", conversationId: `conversation-${crypto.randomUUID()}`, productName: "Leather Bag", cost: 1200 },
     files: [{ fieldname: "images", originalname: "photo.svg", mimetype: "image/svg+xml", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"/>') }]
   });
   assert.equal(draft.status, "NEEDS_CLARIFICATION");
@@ -43,6 +44,26 @@ test("pauses an ambiguous image until its role is clarified", async () => {
   const resolved = answerClarification(draft.id, { questionId: question.id, answer: "product" });
   assert.equal(resolved.status, "BRIEF_READY");
   assert.equal(resolved.media[0].role, "PRIMARY_PRODUCT");
+});
+
+test("asks for product cost when Shopify is selected and never guesses a selling price", async () => {
+  const draft = await addDraftMessage({
+    metadata: {
+      merchantId: "merchant-test",
+      conversationId: `conversation-${crypto.randomUUID()}`,
+      productName: "Leather Bag",
+      targetChannels: ["shopify"],
+      mediaRoles: { product_image: "PRIMARY_PRODUCT" }
+    },
+    files: [{ fieldname: "product_image", originalname: "bag.svg", mimetype: "image/svg+xml", buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"/>') }]
+  });
+  assert.equal(draft.status, "NEEDS_CLARIFICATION");
+  const question = draft.questions.find(item => item.field === "cost");
+  assert.ok(question);
+  const resolved = answerClarification(draft.id, { questionId: question.id, answer: "₹1200" });
+  assert.equal(resolved.status, "BRIEF_READY");
+  assert.equal(resolved.facts.cost, 1200);
+  assert.equal(resolved.facts.price, null);
 });
 
 test("renders one autonomous preview and passes deterministic quality gates", async () => {

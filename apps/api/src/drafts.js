@@ -7,9 +7,10 @@ import { loadDrafts, persistDraft } from "./state-db.js";
 
 const drafts = new Map(loadDrafts().map(draft => [draft.id, draft]));
 const clean = value => String(value || "").trim();
-const supportedChannels = new Set(["instagram", "facebook"]);
+const supportedChannels = new Set(["instagram", "facebook", "shopify"]);
+const defaultImageChannels = ["instagram", "facebook", "shopify"];
 
-function normalizeTargetChannels(value, fallback = ["instagram", "facebook"]) {
+function normalizeTargetChannels(value, fallback = defaultImageChannels) {
   if (value === undefined || value === null || value === "") return [...fallback];
   let parsed = value;
   if (typeof value === "string") {
@@ -37,7 +38,7 @@ function publicDraft(draft) {
     merchantId: draft.merchantId,
     conversationId: draft.conversationId,
     sourceChannel: draft.sourceChannel || "whatsapp",
-    targetChannels: [...(draft.targetChannels || ["instagram", "facebook"])],
+    targetChannels: [...(draft.targetChannels || defaultImageChannels)],
     productId: draft.productId,
     status: draft.status,
     facts: { ...draft.facts },
@@ -54,7 +55,7 @@ function recompute(draft) {
   const text = draft.messages.map(message => message.text).filter(Boolean).join(" ");
   const transcripts = draft.media.map(item => item.transcript).filter(Boolean);
   draft.facts = extractBriefFacts({ metadata: mergedMetadata, text, transcripts });
-  draft.questions = buildClarifications({ facts: draft.facts, media: draft.media });
+  draft.questions = buildClarifications({ facts: draft.facts, media: draft.media, targetChannels: draft.targetChannels });
   draft.status = draft.questions.length ? "NEEDS_CLARIFICATION" : "BRIEF_READY";
   draft.updatedAt = new Date().toISOString();
 }
@@ -179,6 +180,11 @@ export function answerClarification(id, payload = {}) {
   }
   const factPatch = { ...(payload.facts || {}) };
   if (question.field === "productName" && answer) factPatch.productName = answer;
+  if (question.field === "cost" && answer) {
+    const cost = Number(String(answer).replace(/[^0-9.]/g, ""));
+    if (!(cost > 0)) throw new Error("Enter a valid product cost greater than zero.");
+    factPatch.cost = cost;
+  }
   if (question.field === "audioTranscript" && answer) {
     for (const assetId of question.assetIds || []) {
       const item = draft.media.find(media => media.assetId === assetId);
@@ -217,6 +223,12 @@ export function draftToDesignInput(id) {
     brief: toLegacyBrief(draft.facts),
     productAssetIds,
     referenceAssetIds: draft.media.filter(item => ["STYLE_REFERENCE", "BACKGROUND_REFERENCE"].includes(item.role)).map(item => item.assetId),
-    draft: publicDraft(draft)
+    draft: publicDraft(draft),
+    commerce: {
+      cost: draft.facts.cost,
+      sku: draft.facts.sku,
+      vendor: draft.facts.brand,
+      productType: draft.facts.category
+    }
   };
 }

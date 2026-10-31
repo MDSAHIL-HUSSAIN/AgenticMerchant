@@ -83,7 +83,8 @@ async function processIntegrationMessage(sourceChannel, { metadata = {}, text = 
       productId: input.draft.productId,
       productDraftId: draft.id,
       sourceChannel: input.draft.sourceChannel,
-      targetChannels: input.draft.targetChannels
+      targetChannels: input.draft.targetChannels,
+      commerce: input.commerce
     }
   );
   const handoff = await deliverCurrentPreview(job);

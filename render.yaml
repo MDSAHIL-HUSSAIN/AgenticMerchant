@@ -63,3 +63,13 @@ services:
         sync: false
       - key: INTERNAL_SERVICE_TOKEN
         sync: false
+      - key: SHOPIFY_CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: SHOPIFY_CLOUDINARY_API_KEY
+        sync: false
+      - key: SHOPIFY_CLOUDINARY_API_SECRET
+        sync: false
+      - key: SHOPIFY_PUBLISH_URL
+        value: https://storebot-shopify.onrender.com/process
+      - key: SHOPIFY_PUBLISH_SECRET
+        sync: false

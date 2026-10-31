@@ -12,6 +12,30 @@ This prototype contains the image workflow plus an autonomous local video-post w
 
 The Adobe Express add-on remains available as the optional editable-canvas bridge. Automatic preview creation no longer depends on Adobe Express being open.
 
+## Current deployed status (31 October 2026)
+
+The Agentic API at `https://agentic-image-api.onrender.com` now includes an experimental Gemini Pro web-video path in addition to the existing image and historical local-video systems. Agentic commit `5c00bcb` is pushed and deployed. A live test successfully created a job, leased it to the local Windows worker, generated and downloaded the Gemini MP4, issued a signed storage upload, verified the uploaded object, and placed the job into merchant review.
+
+The companion dashboard implementation is complete locally but still needs to be committed, pushed and deployed from `D:\E Drive\Project\dashboard`. After it is live, configure Agentic's `DASHBOARD_HANDOFF_URL` with the dashboard's `/integrations/agentic/previews` endpoint. See `CURRENT_WORK_HANDOFF.md` for the authoritative deployment state and next actions, and `GEMINI_WEB_VIDEO_PIPELINE.md` for focused worker setup.
+
+### Gemini web-video flow
+
+```text
+dashboard request
+-> Render/PostgreSQL job
+-> local BAT worker
+-> Qwen prompt planning
+-> Playwright + dedicated logged-in Gemini Chrome profile
+-> original Gemini MP4 download
+-> read-only MP4 validation
+-> direct worker-to-object-storage upload
+-> dashboard preview
+-> explicit merchant approval
+-> Instagram/Facebook Reel publication
+```
+
+This path does not invoke the image pipeline when no product image exists and does not use FFmpeg, editing, transitions, overlays, LTX or FramePack. Chrome opens minimized and may remain minimized after the first interactive login. The local PC, Chrome profile, Ollama/Qwen and BAT worker must remain available while jobs are processed. Automating the consumer Gemini website is experimental and subject to Google's UI, account controls, quotas and terms.
+
 ## Current pipeline
 
 ```text
@@ -201,14 +225,16 @@ Supported actions are `APPROVE_ALL`, `APPROVE_SELECTED`, `EDIT_SELECTED`, `REJEC
 
 ### Voice dashboard integration
 
-The dashboard uses separate, image-only integration routes while sharing the same draft, clarification, rendering, revision, approval and publishing engine:
+The dashboard uses separate integration routes for the existing image workflow while sharing the same draft, clarification, rendering, revision, approval and publishing engine:
 
 ```text
 POST /api/integrations/dashboard/messages
 POST /api/integrations/dashboard/jobs/:id/feedback
 ```
 
-Configure `DASHBOARD_HANDOFF_URL` with the dashboard's `/integrations/agentic/previews` URL. Jobs carry `sourceChannel` and are routed only to their originating service: dashboard previews never use `WHATSAPP_HANDOFF_URL`, and WhatsApp previews never use `DASHBOARD_HANDOFF_URL`. `targetChannels` may contain `instagram` and/or `facebook`; only those requested image publishers run on approval. An explicit empty list exports the approved image without social publishing.
+Configure `DASHBOARD_HANDOFF_URL` with the dashboard's `/integrations/agentic/previews` URL. Jobs carry `sourceChannel` and are routed only to their originating service: dashboard previews never use `WHATSAPP_HANDOFF_URL`, and WhatsApp previews never use `DASHBOARD_HANDOFF_URL`. Image `targetChannels` may contain `instagram`, `facebook`, and/or `shopify`; only those requested publishers run on approval. An explicit empty list exports the approved image without publishing. Gemini video targets remain limited to Instagram and Facebook.
+
+The same dashboard also supports the independent Gemini web-video job endpoints under `/api/gemini-video/jobs`. It accepts `video.preview_ready` callbacks, renders the public 9:16 MP4 for review, and offers approve/publish, regenerate and reject actions. Video approval requires an explicit `confirm: true` and immediately attempts the configured Meta Reel publishers.
 
 ## Final exports and publishing handoff
 
@@ -239,6 +265,10 @@ Configure the receiver with `PUBLISHING_HANDOFF_URL`. Both handoff adapters can 
 The prototype can also work with the Facebook teammate's current publisher without changing that repository. Configure `FACEBOOK_CLOUDINARY_CLOUD_NAME`, `FACEBOOK_CLOUDINARY_API_KEY`, `FACEBOOK_CLOUDINARY_API_SECRET`, `FACEBOOK_PUBLISH_URL`, and `FACEBOOK_PUBLISH_SECRET`. On approval, the service uploads the one approved `facebook_feed` PNG to the dedicated Facebook Cloudinary account and only then calls the existing `/api/publish` trigger. Upload and publishing are sequential because the existing publisher selects the newest untagged Cloudinary image. When `PUBLISHING_HANDOFF_URL` is configured, the same approval sends the complete platform-tagged binary export set to the shared publishing receiver for the other services.
 
 For the teammate's Instagram image publisher, configure `INSTAGRAM_PUBLISH_URL` and `INSTAGRAM_PUBLISH_API_KEY`. Approval sends only the `instagram_portrait` export as multipart field `file` with the shared key in `X-API-Key`. The teammate service generates the caption when none is supplied and returns `instagram_post_id`, which Agentic records in the publishing handoff. Reel delivery remains disabled in this adapter until the video workflow is explicitly integrated.
+
+### StoreBot Shopify integration
+
+Configure `SHOPIFY_CLOUDINARY_CLOUD_NAME`, `SHOPIFY_CLOUDINARY_API_KEY`, `SHOPIFY_CLOUDINARY_API_SECRET`, `SHOPIFY_PUBLISH_URL`, and `SHOPIFY_PUBLISH_SECRET` with the same Cloudinary account and webhook secret used by StoreBot Shopify. After explicit approval, Agentic uploads only the approved `shopify` 1600×1600 PNG and sends its Cloudinary public ID plus product cost to StoreBot. Agentic never supplies a selling price; StoreBot calculates it and creates the Shopify product as `DRAFT`. Dashboard inventory provides its saved cost automatically. WhatsApp and general dashboard briefs ask for product cost when Shopify is selected and cost is missing.
 
 ## Optional Adobe manual editing
 
@@ -332,4 +362,4 @@ Implemented now:
 - idempotent private publishing handoff;
 - optional native Adobe edit and rendition round-trip.
 
-The remaining infrastructure boundary is persistence: draft, job, revision and queue metadata currently live in process memory while binary assets live under `apps/api/data`. Replace `job-store.js`, `drafts.js`, `adobe-queue.js` and `media-store.js` with the Railway/database adapters when the shared schema is available; the API contracts and rendering workflow do not need to change.
+The remaining legacy infrastructure boundary is persistence for older image drafts, revisions and queues: much of that metadata still lives in process memory while binary assets live under `apps/api/data`. Gemini web-video jobs are separately durable in PostgreSQL and their MP4s live in configured S3-compatible object storage. Replace the older `job-store.js`, `drafts.js`, `adobe-queue.js` and `media-store.js` implementations with durable adapters when the shared schema is available; their API contracts and rendering workflow do not need to change.

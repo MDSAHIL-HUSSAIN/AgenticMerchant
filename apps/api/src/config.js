@@ -46,6 +46,11 @@ export const config = {
   facebookPublishSecret: process.env.FACEBOOK_PUBLISH_SECRET || "",
   instagramPublishUrl: process.env.INSTAGRAM_PUBLISH_URL || "",
   instagramPublishApiKey: process.env.INSTAGRAM_PUBLISH_API_KEY || "",
+  shopifyCloudinaryCloudName: process.env.SHOPIFY_CLOUDINARY_CLOUD_NAME || "",
+  shopifyCloudinaryApiKey: process.env.SHOPIFY_CLOUDINARY_API_KEY || "",
+  shopifyCloudinaryApiSecret: process.env.SHOPIFY_CLOUDINARY_API_SECRET || "",
+  shopifyPublishUrl: process.env.SHOPIFY_PUBLISH_URL || "",
+  shopifyPublishSecret: process.env.SHOPIFY_PUBLISH_SECRET || "",
   serpApiKey: process.env.SERPAPI_KEY || "",
   tavilyApiKey: process.env.TAVILY_API_KEY || "",
   geminiApiKey: process.env.GEMINI_API_KEY || "",
@@ -151,6 +156,13 @@ export function providerStatus() {
       config.facebookPublishUrl &&
       config.facebookPublishSecret
     ),
-    instagramPublisher: Boolean(config.instagramPublishUrl && config.instagramPublishApiKey)
+    instagramPublisher: Boolean(config.instagramPublishUrl && config.instagramPublishApiKey),
+    shopifyPublisher: Boolean(
+      config.shopifyCloudinaryCloudName &&
+      config.shopifyCloudinaryApiKey &&
+      config.shopifyCloudinaryApiSecret &&
+      config.shopifyPublishUrl &&
+      config.shopifyPublishSecret
+    )
   };
 }

@@ -56,10 +56,11 @@ export function registerJob(rawJob, context = {}) {
     conversationId: context.conversationId || rawJob.conversationId || "",
     sourceChannel: context.sourceChannel || rawJob.sourceChannel || "whatsapp",
     targetChannels: Array.isArray(context.targetChannels)
-      ? [...new Set(context.targetChannels.map(item => String(item).toLowerCase()).filter(item => ["instagram", "facebook"].includes(item)))]
-      : (Array.isArray(rawJob.targetChannels) ? rawJob.targetChannels : ["instagram", "facebook"]),
+      ? [...new Set(context.targetChannels.map(item => String(item).toLowerCase()).filter(item => ["instagram", "facebook", "shopify"].includes(item)))]
+      : (Array.isArray(rawJob.targetChannels) ? rawJob.targetChannels : ["instagram", "facebook", "shopify"]),
     productId: context.productId || rawJob.productId || "",
     productDraftId: context.productDraftId || rawJob.productDraftId || "",
+    commerce: structuredClone(context.commerce || rawJob.commerce || {}),
     status: rawJob.status || "AWAITING_APPROVAL",
     currentRevisionId: revision.id,
     revisionNumber: 1,

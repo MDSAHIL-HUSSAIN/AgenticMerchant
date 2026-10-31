@@ -35,17 +35,22 @@ export function extractBriefFacts({ metadata = {}, text = "", transcripts = [] }
   const inferredProduct = pick(/(?:product|item|this is|new)\s*(?:is|:|-)?\s*([a-z][a-z0-9 &'/-]{2,45})/i, combined)
     || pick(/^([a-z0-9 &'/-]{2,50}(?:kurti|shirt|shoe|sneaker|bag|watch|dress|serum|bottle|phone|laptop|jacket|hoodie|top|jeans|sandal|cream|soap))/i, combined);
   const productName = clean(metadata.productName || metadata.product || inferredProduct);
-  const priceText = metadata.price ?? pick(/(?:₹|rs\.?|inr)\s*([0-9][0-9,.]*)/i, combined);
+  const costText = metadata.cost ?? metadata.costPrice ?? metadata.productCost ?? metadata.purchaseCost
+    ?? pick(/(?:product\s+)?cost(?:\s+price)?\s*(?:is|:|-)?\s*(?:₹|rs\.?|inr)?\s*([0-9][0-9,.]*)/i, combined);
+  const priceText = metadata.price ?? (costText ? "" : pick(/(?:price\s*(?:is|:|-)?\s*)?(?:₹|rs\.?|inr)\s*([0-9][0-9,.]*)/i, combined));
   const sizesText = metadata.sizes ?? pick(/sizes?\s*(?:are|:|-)?\s*([a-z0-9, /-]+)/i, combined);
   const colorsText = metadata.colors ?? metadata.colorway ?? pick(/colou?r\s*(?:is|:|-)?\s*([a-z ,/-]+)/i, combined);
   const list = value => Array.isArray(value) ? value.map(clean).filter(Boolean) : clean(value).split(/[,/]|\band\b/i).map(clean).filter(Boolean);
   const price = Number(String(priceText || "").replace(/[^0-9.]/g, "")) || null;
+  const cost = Number(String(costText || "").replace(/[^0-9.]/g, "")) || null;
   return {
     productName,
     brand: clean(metadata.brand),
     category: clean(metadata.category),
     model: clean(metadata.model || metadata.sku),
     price,
+    cost,
+    sku: clean(metadata.sku),
     features: list(metadata.features),
     colors: list(colorsText),
     sizes: list(sizesText),
@@ -56,10 +61,18 @@ export function extractBriefFacts({ metadata = {}, text = "", transcripts = [] }
   };
 }
 
-export function buildClarifications({ facts, media }) {
+export function buildClarifications({ facts, media, targetChannels = [] }) {
   const questions = [];
   if (!facts.productName || facts.productName.length < 3) {
     questions.push({ id: crypto.randomUUID(), field: "productName", question: "What is the exact product name?", choices: [] });
+  }
+  if (targetChannels.includes("shopify") && !(Number(facts.cost) > 0)) {
+    questions.push({
+      id: crypto.randomUUID(),
+      field: "cost",
+      question: "What is the product cost in INR? Shopify will calculate the selling price automatically from this cost.",
+      choices: []
+    });
   }
   const uncertainImages = media.filter(item => item.mediaType === "image" && item.role === "UNCERTAIN");
   if (uncertainImages.length) {

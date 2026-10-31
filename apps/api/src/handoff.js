@@ -27,6 +27,16 @@ function instagramConfigured() {
   return Boolean(config.instagramPublishUrl && config.instagramPublishApiKey);
 }
 
+function shopifyConfigured() {
+  return Boolean(
+    config.shopifyCloudinaryCloudName &&
+    config.shopifyCloudinaryApiKey &&
+    config.shopifyCloudinaryApiSecret &&
+    config.shopifyPublishUrl &&
+    config.shopifyPublishSecret
+  );
+}
+
 function previewDestination(job) {
   if ((job.sourceChannel || "whatsapp") === "dashboard") {
     return { url: config.dashboardHandoffUrl, channel: "dashboard", label: "dashboard" };
@@ -35,16 +45,16 @@ function previewDestination(job) {
 }
 
 function requestedChannels(job) {
-  if (!Array.isArray(job.targetChannels)) return new Set(["instagram", "facebook"]);
+  if (!Array.isArray(job.targetChannels)) return new Set(["instagram", "facebook", "shopify"]);
   return new Set(job.targetChannels.map(item => String(item).toLowerCase()));
 }
 
-function cloudinarySignature(params) {
+function cloudinarySignature(params, apiSecret = config.facebookCloudinaryApiSecret) {
   const serialized = Object.entries(params)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => `${key}=${value}`)
     .join("&");
-  return createHash("sha1").update(`${serialized}${config.facebookCloudinaryApiSecret}`).digest("hex");
+  return createHash("sha1").update(`${serialized}${apiSecret}`).digest("hex");
 }
 
 async function uploadFacebookImage(job, asset) {
@@ -174,6 +184,89 @@ export async function deliverInstagramImage(job) {
   return result;
 }
 
+async function uploadShopifyImage(job, asset) {
+  activity(job, "shopify", "MEDIA_READ", "RUNNING", "Reading the approved Shopify image export from local storage.", { assetId: asset.assetId, platform: asset.platform });
+  const { record, bytes } = await readMedia(asset.assetId);
+  const timestamp = Math.floor(Date.now() / 1000);
+  const publicId = [
+    "storebot", "shopify", cleanSegment(job.merchantId || "merchant"),
+    cleanSegment(job.productId || job.id), cleanSegment(job.currentRevisionId)
+  ].join("/");
+  const signed = { public_id: publicId, timestamp };
+  const form = new FormData();
+  form.append("file", new Blob([bytes], { type: record.mimeType }), record.filename);
+  form.append("api_key", config.shopifyCloudinaryApiKey);
+  form.append("timestamp", String(timestamp));
+  form.append("public_id", publicId);
+  form.append("signature", cloudinarySignature(signed, config.shopifyCloudinaryApiSecret));
+  const uploadUrl = `https://api.cloudinary.com/v1_1/${encodeURIComponent(config.shopifyCloudinaryCloudName)}/image/upload`;
+  activity(job, "shopify", "MEDIA_UPLOAD", "RUNNING", "Uploading the approved Shopify image to StoreBot's media account.", { filename: record.filename, mimeType: record.mimeType, bytes: record.byteLength });
+  const response = await fetch(uploadUrl, { method: "POST", body: form, signal: AbortSignal.timeout(60_000) });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.secure_url || !body.public_id) {
+    activity(job, "shopify", "MEDIA_UPLOAD", "FAILED", "Shopify media staging upload failed.", { httpStatus: response.status, reason: body.error?.message || "unknown response" });
+    throw new Error(`Shopify Cloudinary upload failed (${response.status}): ${String(body.error?.message || "unknown response").slice(0, 240)}`);
+  }
+  activity(job, "shopify", "MEDIA_UPLOAD", "SUCCESS", "Shopify image upload completed successfully.", { publicId: body.public_id, bytes: record.byteLength });
+  return { publicId: body.public_id, secureUrl: body.secure_url, bytes: record.byteLength };
+}
+
+export async function deliverShopifyImage(job) {
+  if (!shopifyConfigured()) {
+    activity(job, "shopify", "CONFIGURATION", "SKIPPED", "Shopify publishing was skipped because its connection is not configured.");
+    return { status: "NOT_CONFIGURED", deliveredAt: null, channel: "shopify" };
+  }
+  const cost = Number(job.commerce?.cost);
+  if (!(cost > 0)) {
+    activity(job, "shopify", "PRODUCT_DATA", "FAILED", "Shopify publishing requires a valid product cost so StoreBot can calculate the selling price.");
+    throw new Error("Shopify publishing requires a valid product cost greater than zero.");
+  }
+  const asset = (job.finalAssets || []).find(item => item.platform === "shopify");
+  if (!asset) {
+    activity(job, "shopify", "ASSET_SELECTION", "FAILED", "No Shopify export was found in the approved assets.");
+    throw new Error("The approved job has no shopify export.");
+  }
+  activity(job, "shopify", "PUBLISH", "STARTED", "Starting Shopify draft-product creation for the approved image.");
+  const cloudinary = await uploadShopifyImage(job, asset);
+  const product = {
+    public_id: cloudinary.publicId,
+    cost,
+    sku: job.commerce?.sku || undefined,
+    vendor: job.commerce?.vendor || job.brief?.brand || undefined,
+    product_type: job.commerce?.productType || job.brief?.category || undefined
+  };
+  const response = await fetch(config.shopifyPublishUrl, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.shopifyPublishSecret}`,
+      "content-type": "application/json",
+      "idempotency-key": `shopify:${job.id}:${job.currentRevisionId}`
+    },
+    body: JSON.stringify({ approved: true, public_id: cloudinary.publicId, dashboard: { product } }),
+    signal: AbortSignal.timeout(180_000)
+  });
+  const text = await response.text();
+  let payload = {};
+  try { payload = text ? JSON.parse(text) : {}; } catch { payload = { raw: text.slice(0, 500) }; }
+  if (!response.ok || !payload.product_id) {
+    activity(job, "shopify", "PRODUCT_CREATE", "FAILED", "StoreBot failed to create the Shopify draft product.", { httpStatus: response.status, reason: payload.error || text || "unknown response" });
+    throw new Error(`Shopify publisher failed (${response.status}): ${String(payload.error || text || "unknown response").slice(0, 300)}`);
+  }
+  const result = {
+    status: "DELIVERED",
+    channel: "shopify",
+    deliveredAt: new Date().toISOString(),
+    cloudinaryPublicId: cloudinary.publicId,
+    shopifyProductId: payload.product_id,
+    productStatus: payload.status || "DRAFT",
+    title: payload.title || null,
+    sellingPrice: payload.selling_price || null,
+    publisher: payload
+  };
+  activity(job, "shopify", "PUBLISH", "SUCCESS", "Shopify draft product creation completed.", { shopifyProductId: result.shopifyProductId, productStatus: result.productStatus });
+  return result;
+}
+
 async function postMultipart(url, metadata, assets, idempotencyKey, logContext = {}) {
   const { job = null, channel = "handoff", purpose = "media handoff" } = logContext;
   if (!url) {
@@ -231,7 +324,7 @@ export async function deliverPreviewPack(job) {
     revisionId: job.currentRevisionId,
     revisionNumber: job.revisionNumber,
     sourceChannel: job.sourceChannel || "whatsapp",
-    targetChannels: Array.isArray(job.targetChannels) ? job.targetChannels : ["instagram", "facebook"],
+    targetChannels: Array.isArray(job.targetChannels) ? job.targetChannels : ["instagram", "facebook", "shopify"],
     designs: job.designs.map((design, index) => ({
       designId: design.id,
       concept: design.kind,
@@ -293,6 +386,20 @@ export async function deliverPublishingAssets(job) {
       : job.type === "VIDEO_POST"
       ? "The current Instagram connector is image-only, so the video export was not sent through that connector."
       : "Instagram publishing was skipped because its connection is not configured.");
+  }
+  if (targets.has("shopify") && job.type !== "VIDEO_POST" && shopifyConfigured()) {
+    attempts.push(
+      deliverShopifyImage(job).catch(error => {
+        activity(job, "shopify", "PUBLISH", "FAILED", "Shopify publishing stopped with an error.", { error: error.message });
+        return { status: "FAILED", channel: "shopify", deliveredAt: null, error: error.message };
+      })
+    );
+  } else {
+    activity(job, "shopify", "PUBLISH", "SKIPPED", !targets.has("shopify")
+      ? "Shopify publishing was not requested for this job."
+      : job.type === "VIDEO_POST"
+      ? "The Shopify connector accepts image products only, so video was not sent."
+      : "Shopify publishing was skipped because its connection is not configured.");
   }
   if (targets.size && config.publishingHandoffUrl) {
     attempts.push(
